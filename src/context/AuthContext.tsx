@@ -58,105 +58,110 @@ interface AuthContextType {
 const AuthContext =
   createContext<AuthContextType | undefined>(undefined);
 
+/**
+ * Resolve the profile for a signed-in Firebase user.
+ *
+ * IMPORTANT:
+ * This prioritizes the project's hardcoded sample staff accounts before
+ * looking at a profile stored locally. That prevents an old local student
+ * profile for a sample staff email from masking the sample staff role.
+ *
+ * This is suitable only for the existing demo/sample-account setup.
+ * For production, resolve roles from an authoritative Firestore document or
+ * Firebase custom claims, and enforce access in backend/Firestore rules.
+ */
 function resolveExistingRole(
   firebaseUser: FirebaseUser
 ): UserProfile {
-  const email = (firebaseUser.email || '').toLowerCase();
+  const email = (firebaseUser.email || '').trim().toLowerCase();
 
-  const existing =
-    eventPassStore.getUserById(firebaseUser.uid) ||
-    eventPassStore.getUserByEmail(email);
-
-  if (existing) {
-    eventPassStore.setCurrentUser(existing);
-    return existing;
-  }
+  const withFirebaseIdentity = (
+    profile: UserProfile
+  ): UserProfile => ({
+    ...profile,
+    uid: firebaseUser.uid,
+    email: firebaseUser.email || profile.email,
+    displayName:
+      firebaseUser.displayName || profile.displayName,
+    photoURL:
+      firebaseUser.photoURL || profile.photoURL,
+  });
 
   /*
-   * These mappings keep the supplied sample accounts usable.
-   * In production, roles should come from Firestore.
+   * Check known sample staff accounts FIRST.
+   * This order is intentional: an old local profile must not override these
+   * sample mappings merely because its email matches.
    */
-
   const proctor = INITIAL_PROCTORS.find(
-    (user) => user.email.toLowerCase() === email
+    (user) => user.email.trim().toLowerCase() === email
   );
 
   if (proctor) {
-    const updated = {
-      ...proctor,
-      uid: firebaseUser.uid,
-      email: firebaseUser.email || proctor.email,
-      displayName:
-        firebaseUser.displayName || proctor.displayName,
-      photoURL: firebaseUser.photoURL || proctor.photoURL,
-    };
-
+    const updated = withFirebaseIdentity(proctor);
     eventPassStore.setCurrentUser(updated);
     return updated;
   }
 
-  if (INITIAL_INCHARGE.email.toLowerCase() === email) {
-    const updated = {
-      ...INITIAL_INCHARGE,
-      uid: firebaseUser.uid,
-      email: firebaseUser.email || INITIAL_INCHARGE.email,
-      displayName:
-        firebaseUser.displayName || INITIAL_INCHARGE.displayName,
-    };
-
+  if (INITIAL_INCHARGE.email.trim().toLowerCase() === email) {
+    const updated = withFirebaseIdentity(INITIAL_INCHARGE);
     eventPassStore.setCurrentUser(updated);
     return updated;
   }
 
-  if (INITIAL_ADMIN.email.toLowerCase() === email) {
-    const updated = {
-      ...INITIAL_ADMIN,
-      uid: firebaseUser.uid,
-      email: firebaseUser.email || INITIAL_ADMIN.email,
-      displayName:
-        firebaseUser.displayName || INITIAL_ADMIN.displayName,
-    };
-
+  if (INITIAL_ADMIN.email.trim().toLowerCase() === email) {
+    const updated = withFirebaseIdentity(INITIAL_ADMIN);
     eventPassStore.setCurrentUser(updated);
     return updated;
   }
 
   /*
-   * Existing student account matched by email.
+   * For non-sample accounts, preserve an existing profile.
+   * UID is checked before email to avoid accidentally matching a different
+   * account that happens to share an email value in local demo data.
+   */
+  const existingById =
+    eventPassStore.getUserById(firebaseUser.uid);
+
+  if (existingById) {
+    eventPassStore.setCurrentUser(existingById);
+    return existingById;
+  }
+
+  const existingByEmail =
+    eventPassStore.getUserByEmail(email);
+
+  if (existingByEmail) {
+    const updated = withFirebaseIdentity(existingByEmail);
+    eventPassStore.setCurrentUser(updated);
+    return updated;
+  }
+
+  /*
+   * Match the supplied sample student accounts.
    */
   const student = INITIAL_STUDENTS.find(
-    (user) => user.email.toLowerCase() === email
+    (user) => user.email.trim().toLowerCase() === email
   );
 
   if (student) {
-    const updated = {
-      ...student,
-      uid: firebaseUser.uid,
-      email: firebaseUser.email || student.email,
-      displayName:
-        firebaseUser.displayName || student.displayName,
-      photoURL: firebaseUser.photoURL || student.photoURL,
-    };
-
+    const updated = withFirebaseIdentity(student);
     eventPassStore.setCurrentUser(updated);
     return updated;
   }
 
   /*
-   * New Firebase accounts are students by default.
+   * Unknown Firebase accounts are registered as students in this demo.
+   * Do not use this fallback to grant staff access in production.
    */
   const created =
     eventPassStore.createOrRegisterUser({
       uid: firebaseUser.uid,
       email: firebaseUser.email || '',
-      displayName:
-        firebaseUser.displayName || '',
-      photoURL:
-        firebaseUser.photoURL || undefined,
+      displayName: firebaseUser.displayName || '',
+      photoURL: firebaseUser.photoURL || undefined,
     });
 
   eventPassStore.setCurrentUser(created);
-
   return created;
 }
 
@@ -181,20 +186,14 @@ export const AuthProvider: React.FC<{
       (firebaseUser) => {
         try {
           if (firebaseUser) {
-            const profile =
-              resolveExistingRole(firebaseUser);
-
+            const profile = resolveExistingRole(firebaseUser);
             setCurrentUser(profile);
           } else {
             eventPassStore.setCurrentUser(null);
             setCurrentUser(null);
           }
         } catch (error) {
-          console.error(
-            'Session initialization failed:',
-            error
-          );
-
+          console.error('Session initialization failed:', error);
           setCurrentUser(null);
         } finally {
           setIsLoading(false);
@@ -215,13 +214,10 @@ export const AuthProvider: React.FC<{
     setIsLoading(true);
 
     try {
-      const result =
-        await signInWithPopup(
-          auth,
-          googleProvider
-        );
-
-      return resolveExistingRole(result.user);
+      const result = await signInWithPopup(auth, googleProvider);
+      const profile = resolveExistingRole(result.user);
+      setCurrentUser(profile);
+      return profile;
     } finally {
       setIsLoading(false);
     }
@@ -238,22 +234,21 @@ export const AuthProvider: React.FC<{
     }
 
     if (!email.trim() || !password) {
-      throw new Error(
-        'Email and password are required.'
-      );
+      throw new Error('Email and password are required.');
     }
 
     setIsLoading(true);
 
     try {
-      const result =
-        await signInWithEmailAndPassword(
-          auth,
-          email.trim(),
-          password
-        );
+      const result = await signInWithEmailAndPassword(
+        auth,
+        email.trim(),
+        password
+      );
 
-      return resolveExistingRole(result.user);
+      const profile = resolveExistingRole(result.user);
+      setCurrentUser(profile);
+      return profile;
     } finally {
       setIsLoading(false);
     }
@@ -279,11 +274,10 @@ export const AuthProvider: React.FC<{
   ) => {
     if (!currentUser) return;
 
-    const updated =
-      eventPassStore.updateUserProfile(
-        currentUser.uid,
-        data
-      );
+    const updated = eventPassStore.updateUserProfile(
+      currentUser.uid,
+      data
+    );
 
     setCurrentUser(updated);
   };
@@ -293,9 +287,7 @@ export const AuthProvider: React.FC<{
       currentUser,
       role: currentUser?.role || null,
       isLoading,
-      isFirebaseActive:
-        isFirebaseConfigured,
-
+      isFirebaseActive: isFirebaseConfigured,
       signInWithGoogle,
       signInWithPassword,
       signOut,
@@ -312,13 +304,10 @@ export const AuthProvider: React.FC<{
 };
 
 export const useAuth = () => {
-  const context =
-    useContext(AuthContext);
+  const context = useContext(AuthContext);
 
   if (!context) {
-    throw new Error(
-      'useAuth must be used inside AuthProvider'
-    );
+    throw new Error('useAuth must be used inside AuthProvider');
   }
 
   return context;

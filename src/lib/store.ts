@@ -1,3 +1,4 @@
+
 import {
   UserProfile,
   EventRequest,
@@ -57,25 +58,50 @@ class EventPassStore {
   private currentUser: UserProfile | null;
 
   constructor() {
-    this.users = getStorageItem<UserProfile[]>('users', deepClone([
-      INITIAL_ADMIN,
-      INITIAL_INCHARGE,
-      ...INITIAL_PROCTORS,
-      ...INITIAL_STUDENTS,
-    ]));
-    this.requests = getStorageItem<EventRequest[]>('requests', deepClone(INITIAL_REQUESTS));
+    this.users = getStorageItem<UserProfile[]>(
+      'users',
+      deepClone([
+        INITIAL_ADMIN,
+        INITIAL_INCHARGE,
+        ...INITIAL_PROCTORS,
+        ...INITIAL_STUDENTS,
+      ])
+    );
+
+    this.requests = getStorageItem<EventRequest[]>(
+      'requests',
+      deepClone(INITIAL_REQUESTS)
+    );
+
     this.attendanceRecords = getStorageItem<AttendanceRecord[]>(
       'attendance_records',
       deepClone(INITIAL_ATTENDANCE_RECORDS)
     );
-    this.datasets = getStorageItem<AttendanceDataset[]>('datasets', deepClone(INITIAL_DATASETS));
-    this.settings = getStorageItem<DepartmentSettings>('settings', deepClone(INITIAL_SETTINGS));
-    this.auditLogs = getStorageItem<AuditLog[]>('audit_logs', deepClone(INITIAL_AUDIT_LOGS));
+
+    this.datasets = getStorageItem<AttendanceDataset[]>(
+      'datasets',
+      deepClone(INITIAL_DATASETS)
+    );
+
+    this.settings = getStorageItem<DepartmentSettings>(
+      'settings',
+      deepClone(INITIAL_SETTINGS)
+    );
+
+    this.auditLogs = getStorageItem<AuditLog[]>(
+      'audit_logs',
+      deepClone(INITIAL_AUDIT_LOGS)
+    );
+
     this.notifications = getStorageItem<NotificationItem[]>(
       'notifications',
       deepClone(INITIAL_NOTIFICATIONS)
     );
-    this.currentUser = getStorageItem<UserProfile | null>('current_user', deepClone(INITIAL_STUDENTS[0]));
+
+    this.currentUser = getStorageItem<UserProfile | null>(
+      'current_user',
+      deepClone(INITIAL_STUDENTS[0])
+    );
   }
 
   public resetToDefault(): void {
@@ -85,6 +111,7 @@ class EventPassStore {
       ...INITIAL_PROCTORS,
       ...INITIAL_STUDENTS,
     ]);
+
     this.requests = deepClone(INITIAL_REQUESTS);
     this.attendanceRecords = deepClone(INITIAL_ATTENDANCE_RECORDS);
     this.datasets = deepClone(INITIAL_DATASETS);
@@ -108,6 +135,7 @@ class EventPassStore {
   }
 
   // Current User & Session
+
   public getCurrentUser(): UserProfile | null {
     return this.currentUser;
   }
@@ -118,6 +146,7 @@ class EventPassStore {
   }
 
   // Users
+
   public getUsers(): UserProfile[] {
     return [...this.users];
   }
@@ -127,33 +156,76 @@ class EventPassStore {
   }
 
   public getUserByEmail(email: string): UserProfile | null {
-    return this.users.find((u) => u.email.toLowerCase() === email.toLowerCase()) || null;
+    return (
+      this.users.find(
+        (u) => u.email.toLowerCase() === email.toLowerCase()
+      ) || null
+    );
   }
 
-  public createOrRegisterUser(authUser: { uid: string; email: string; displayName?: string; photoURL?: string }): UserProfile {
-    const existing = this.getUserById(authUser.uid) || this.getUserByEmail(authUser.email);
+  /**
+   * Return only students who currently have no proctor assigned.
+   * This includes students who register through Google sign-in.
+   */
+  public getUnassignedStudents(): UserProfile[] {
+    return this.users.filter(
+      (user) =>
+        user.role === 'student' &&
+        !user.assignedProctorId &&
+        !user.assignedProctorName
+    );
+  }
+
+  /**
+   * Return registered users whose role is proctor.
+   */
+  public getProctors(): UserProfile[] {
+    return this.users.filter((user) => user.role === 'proctor');
+  }
+
+  public createOrRegisterUser(authUser: {
+    uid: string;
+    email: string;
+    displayName?: string;
+    photoURL?: string;
+  }): UserProfile {
+    const existing =
+      this.getUserById(authUser.uid) ||
+      this.getUserByEmail(authUser.email);
+
     if (existing) {
       this.currentUser = existing;
       setStorageItem('current_user', existing);
       return existing;
     }
 
-    // Default to student role for any new sign in
+    const now = new Date().toISOString();
+
+    const studentCount = this.users.filter(
+      (user) => user.role === 'student'
+    ).length;
+
+    // New Google sign-ins are students until an administrator
+    // changes their role. Leave the proctor assignment empty so
+    // In-Charge can assign one from the dashboard.
     const newUser: UserProfile = {
       uid: authUser.uid,
       email: authUser.email,
-      displayName: authUser.displayName || authUser.email.split('@')[0],
+      displayName:
+        authUser.displayName || authUser.email.split('@')[0],
       role: 'student',
       department: 'Computer Science & Engineering',
       academicYear: '3rd Year',
       section: 'A',
-      rollNumber: `CS2026-${(this.users.filter((u) => u.role === 'student').length + 1).toString().padStart(3, '0')}`,
+      rollNumber: `CS2026-${(studentCount + 1)
+        .toString()
+        .padStart(3, '0')}`,
       isProfileComplete: false,
       photoURL: authUser.photoURL,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      assignedProctorId: INITIAL_PROCTORS[0].uid,
-      assignedProctorName: INITIAL_PROCTORS[0].displayName,
+      createdAt: now,
+      updatedAt: now,
+      assignedProctorId: undefined,
+      assignedProctorName: undefined,
     };
 
     this.users.push(newUser);
@@ -167,18 +239,29 @@ class EventPassStore {
       action: 'USER_REGISTERED',
       targetType: 'auth',
       targetId: newUser.uid,
-      details: { email: newUser.email, assignedRole: 'student' },
+      details: {
+        email: newUser.email,
+        assignedRole: 'student',
+        proctorAssigned: false,
+      },
     });
 
     return newUser;
   }
 
-  public updateUserProfile(uid: string, updates: Partial<UserProfile>): UserProfile {
-    const idx = this.users.findIndex((u) => u.uid === uid);
-    if (idx === -1) throw new Error('User not found');
+  public updateUserProfile(
+    uid: string,
+    updates: Partial<UserProfile>
+  ): UserProfile {
+    const idx = this.users.findIndex((user) => user.uid === uid);
 
-    // Never allow updating role via profile update
+    if (idx === -1) {
+      throw new Error('User not found');
+    }
+
+    // Profile updates cannot change a user's role.
     const { role, ...safeUpdates } = updates;
+
     this.users[idx] = {
       ...this.users[idx],
       ...safeUpdates,
@@ -194,16 +277,30 @@ class EventPassStore {
     return this.users[idx];
   }
 
-  public updateUserRole(uid: string, newRole: UserRole, adminActor: UserProfile): void {
+  public updateUserRole(
+    uid: string,
+    newRole: UserRole,
+    adminActor: UserProfile
+  ): void {
     if (adminActor.role !== 'admin') {
-      throw new Error('Unauthorized: Only administrators can modify user roles.');
+      throw new Error(
+        'Unauthorized: Only administrators can modify user roles.'
+      );
     }
-    const idx = this.users.findIndex((u) => u.uid === uid);
-    if (idx === -1) throw new Error('User not found');
 
-    const prevRole = this.users[idx].role;
-    this.users[idx].role = newRole;
-    this.users[idx].updatedAt = new Date().toISOString();
+    const idx = this.users.findIndex((user) => user.uid === uid);
+
+    if (idx === -1) {
+      throw new Error('User not found');
+    }
+
+    const previousRole = this.users[idx].role;
+
+    this.users[idx] = {
+      ...this.users[idx],
+      role: newRole,
+      updatedAt: new Date().toISOString(),
+    };
 
     if (this.currentUser?.uid === uid) {
       this.currentUser = this.users[idx];
@@ -216,26 +313,57 @@ class EventPassStore {
       action: 'USER_ROLE_CHANGED',
       targetType: 'role',
       targetId: uid,
-      details: { user: this.users[idx].displayName, previousRole: prevRole, newRole },
-      previousState: { role: prevRole },
+      details: {
+        user: this.users[idx].displayName,
+        previousRole,
+        newRole,
+      },
+      previousState: { role: previousRole },
       newState: { role: newRole },
     });
 
     this.persistAll();
   }
 
-  public assignProctorToStudent(studentUid: string, proctorUid: string, adminActor: UserProfile): void {
-    if (adminActor.role !== 'admin' && adminActor.role !== 'incharge') {
-      throw new Error('Unauthorized: Only administrators or In-Charge can assign proctors.');
+  public assignProctorToStudent(
+    studentUid: string,
+    proctorUid: string,
+    adminActor: UserProfile
+  ): void {
+    if (
+      adminActor.role !== 'admin' &&
+      adminActor.role !== 'incharge'
+    ) {
+      throw new Error(
+        'Unauthorized: Only administrators or In-Charge can assign proctors.'
+      );
     }
-    const studentIdx = this.users.findIndex((u) => u.uid === studentUid);
-    const proctor = this.users.find((u) => u.uid === proctorUid);
-    if (studentIdx === -1 || !proctor) throw new Error('Student or Proctor not found');
 
-    const prevProctor = this.users[studentIdx].assignedProctorName;
-    this.users[studentIdx].assignedProctorId = proctor.uid;
-    this.users[studentIdx].assignedProctorName = proctor.displayName;
-    this.users[studentIdx].updatedAt = new Date().toISOString();
+    const studentIdx = this.users.findIndex(
+      (user) => user.uid === studentUid && user.role === 'student'
+    );
+
+    const proctor = this.users.find(
+      (user) => user.uid === proctorUid && user.role === 'proctor'
+    );
+
+    if (studentIdx === -1) {
+      throw new Error('Student not found');
+    }
+
+    if (!proctor) {
+      throw new Error('Selected user is not a registered proctor');
+    }
+
+    const previousProctor =
+      this.users[studentIdx].assignedProctorName || 'Unassigned';
+
+    this.users[studentIdx] = {
+      ...this.users[studentIdx],
+      assignedProctorId: proctor.uid,
+      assignedProctorName: proctor.displayName,
+      updatedAt: new Date().toISOString(),
+    };
 
     this.recordAuditLog({
       actorUid: adminActor.uid,
@@ -246,7 +374,7 @@ class EventPassStore {
       targetId: studentUid,
       details: {
         student: this.users[studentIdx].displayName,
-        previousProctor: prevProctor,
+        previousProctor,
         newProctor: proctor.displayName,
       },
     });
@@ -255,15 +383,20 @@ class EventPassStore {
   }
 
   // Attendance
+
   public getAttendanceRecords(): AttendanceRecord[] {
     return [...this.attendanceRecords];
   }
 
-  public getAttendanceByRollNumber(rollNumber: string): AttendanceRecord | null {
+  public getAttendanceByRollNumber(
+    rollNumber: string
+  ): AttendanceRecord | null {
     if (!rollNumber) return null;
+
     return (
       this.attendanceRecords.find(
-        (r) => r.rollNumber.toUpperCase() === rollNumber.toUpperCase()
+        (record) =>
+          record.rollNumber.toUpperCase() === rollNumber.toUpperCase()
       ) || null
     );
   }
@@ -281,10 +414,13 @@ class EventPassStore {
     actor: UserProfile
   ): DepartmentSettings {
     if (actor.role !== 'incharge' && actor.role !== 'admin') {
-      throw new Error('Unauthorized: Only Technical-Event In-Charge or Admin can update department settings.');
+      throw new Error(
+        'Unauthorized: Only Technical-Event In-Charge or Admin can update department settings.'
+      );
     }
 
-    const prev = { ...this.settings };
+    const previousSettings = { ...this.settings };
+
     this.settings = {
       ...this.settings,
       ...newSettings,
@@ -292,9 +428,14 @@ class EventPassStore {
       updatedBy: actor.displayName,
     };
 
-    // Recalculate pending requests if threshold changed
-    if (newSettings.attendanceThreshold && newSettings.attendanceThreshold !== prev.attendanceThreshold) {
-      this.recalculatePendingRequestSnapshots(newSettings.attendanceThreshold);
+    if (
+      newSettings.attendanceThreshold &&
+      newSettings.attendanceThreshold !==
+        previousSettings.attendanceThreshold
+    ) {
+      this.recalculatePendingRequestSnapshots(
+        newSettings.attendanceThreshold
+      );
     }
 
     this.recordAuditLog({
@@ -304,7 +445,10 @@ class EventPassStore {
       action: 'DEPARTMENT_SETTINGS_UPDATED',
       targetType: 'settings',
       targetId: 'global',
-      details: { previousSettings: prev, updatedSettings: this.settings },
+      details: {
+        previousSettings,
+        updatedSettings: this.settings,
+      },
     });
 
     this.persistAll();
@@ -313,22 +457,27 @@ class EventPassStore {
 
   public commitAttendanceDataset(
     dataset: Omit<AttendanceDataset, 'id' | 'status' | 'isActive'>,
-    records: Omit<AttendanceRecord, 'id' | 'datasetVersion' | 'lastVerifiedAt'>[],
+    records: Omit<
+      AttendanceRecord,
+      'id' | 'datasetVersion' | 'lastVerifiedAt'
+    >[],
     actor: UserProfile
   ): AttendanceDataset {
     if (actor.role !== 'incharge' && actor.role !== 'admin') {
-      throw new Error('Unauthorized: Only Technical-Event In-Charge can commit attendance datasets.');
+      throw new Error(
+        'Unauthorized: Only Technical-Event In-Charge can commit attendance datasets.'
+      );
     }
 
-    // Archive previous active datasets
-    this.datasets.forEach((d) => {
-      if (d.isActive) {
-        d.isActive = false;
-        d.status = 'archived';
+    this.datasets.forEach((item) => {
+      if (item.isActive) {
+        item.isActive = false;
+        item.status = 'archived';
       }
     });
 
     const now = new Date().toISOString();
+
     const newDataset: AttendanceDataset = {
       ...dataset,
       id: `dataset-${Date.now()}`,
@@ -339,37 +488,43 @@ class EventPassStore {
 
     this.datasets.unshift(newDataset);
 
-    // Update attendance records safely
     const updatedRecordsMap = new Map<string, AttendanceRecord>();
-    this.attendanceRecords.forEach((r) => updatedRecordsMap.set(r.rollNumber.toUpperCase(), r));
 
-    records.forEach((r) => {
-      const calc = calculateAttendanceEligibility(
-        r.classesAttended,
-        r.classesConducted,
+    this.attendanceRecords.forEach((record) => {
+      updatedRecordsMap.set(record.rollNumber.toUpperCase(), record);
+    });
+
+    records.forEach((record) => {
+      const calculation = calculateAttendanceEligibility(
+        record.classesAttended,
+        record.classesConducted,
         this.settings.attendanceThreshold,
         now,
         this.settings.dataStalenessDays
       );
 
-      const record: AttendanceRecord = {
-        ...r,
-        id: `att-${r.rollNumber}`,
-        calculatedPercentage: calc.percentage,
-        isEligible: calc.isEligible,
-        statusText: calc.statusText,
+      const updatedRecord: AttendanceRecord = {
+        ...record,
+        id: `att-${record.rollNumber}`,
+        calculatedPercentage: calculation.percentage,
+        isEligible: calculation.isEligible,
+        statusText: calculation.statusText,
         datasetVersion: newDataset.version,
         lastVerifiedAt: now,
-        isStale: calc.isStale,
+        isStale: calculation.isStale,
       };
 
-      updatedRecordsMap.set(r.rollNumber.toUpperCase(), record);
+      updatedRecordsMap.set(
+        record.rollNumber.toUpperCase(),
+        updatedRecord
+      );
     });
 
     this.attendanceRecords = Array.from(updatedRecordsMap.values());
 
-    // Recalculate pending event requests
-    this.recalculatePendingRequestSnapshots(this.settings.attendanceThreshold);
+    this.recalculatePendingRequestSnapshots(
+      this.settings.attendanceThreshold
+    );
 
     this.recordAuditLog({
       actorUid: actor.uid,
@@ -391,76 +546,87 @@ class EventPassStore {
   }
 
   private recalculatePendingRequestSnapshots(threshold: number): void {
-    const activeDataset = this.datasets.find((d) => d.isActive) || this.datasets[0];
+    const activeDataset =
+      this.datasets.find((dataset) => dataset.isActive) ||
+      this.datasets[0];
+
     const version = activeDataset ? activeDataset.version : 'v1.0.0';
 
-    this.requests.forEach((req) => {
-      // Only recalculate non-finalized requests (preserve historical evidence)
+    this.requests.forEach((request) => {
       if (
-        req.status === 'Draft' ||
-        req.status === 'Submitted' ||
-        req.status === 'Under Proctor Review' ||
-        req.status === 'Returned for Correction' ||
-        req.status === 'Recommended for Approval' ||
-        req.status === 'Recommended for Rejection' ||
-        req.status === 'Pending Final Decision'
+        request.status === 'Draft' ||
+        request.status === 'Submitted' ||
+        request.status === 'Under Proctor Review' ||
+        request.status === 'Returned for Correction' ||
+        request.status === 'Recommended for Approval' ||
+        request.status === 'Recommended for Rejection' ||
+        request.status === 'Pending Final Decision'
       ) {
-        const att = this.getAttendanceByRollNumber(req.studentRollNumber);
-        if (att) {
-          const calc = calculateAttendanceEligibility(
-            att.classesAttended,
-            att.classesConducted,
+        const attendance = this.getAttendanceByRollNumber(
+          request.studentRollNumber
+        );
+
+        if (attendance) {
+          const calculation = calculateAttendanceEligibility(
+            attendance.classesAttended,
+            attendance.classesConducted,
             threshold,
-            att.lastVerifiedAt,
+            attendance.lastVerifiedAt,
             this.settings.dataStalenessDays
           );
 
-          req.attendanceSnapshot = {
-            percentage: calc.percentage,
-            classesAttended: att.classesAttended,
-            classesConducted: att.classesConducted,
+          request.attendanceSnapshot = {
+            percentage: calculation.percentage,
+            classesAttended: attendance.classesAttended,
+            classesConducted: attendance.classesConducted,
             threshold,
-            isEligible: calc.isEligible,
-            statusText: calc.statusText,
+            isEligible: calculation.isEligible,
+            statusText: calculation.statusText,
             calculatedAt: new Date().toISOString(),
             datasetVersion: version,
-            isStale: calc.isStale,
+            isStale: calculation.isStale,
           };
-          req.updatedAt = new Date().toISOString();
+
+          request.updatedAt = new Date().toISOString();
         }
       }
     });
   }
 
   // Event Requests
+
   public getEventRequests(filter?: {
     role?: UserRole;
     userUid?: string;
     studentRollNumber?: string;
   }): EventRequest[] {
-    let list = [...this.requests];
+    const list = [...this.requests];
 
     if (!filter) return list;
 
     if (filter.role === 'student' && filter.userUid) {
-      return list.filter((r) => r.studentUid === filter.userUid);
+      return list.filter(
+        (request) => request.studentUid === filter.userUid
+      );
     }
 
     if (filter.role === 'proctor' && filter.userUid) {
-      // Find students assigned to this proctor
       const assignedStudents = new Set(
         this.users
-          .filter((u) => u.assignedProctorId === filter.userUid)
-          .map((u) => u.uid)
+          .filter((user) => user.assignedProctorId === filter.userUid)
+          .map((user) => user.uid)
       );
-      return list.filter((r) => assignedStudents.has(r.studentUid));
+
+      return list.filter((request) =>
+        assignedStudents.has(request.studentUid)
+      );
     }
 
     return list;
   }
 
   public getEventRequestById(id: string): EventRequest | null {
-    return this.requests.find((r) => r.id === id) || null;
+    return this.requests.find((request) => request.id === id) || null;
   }
 
   public createEventRequest(
@@ -482,15 +648,20 @@ class EventPassStore {
       throw new Error('Only students can create event requests.');
     }
 
-    // Get current attendance snapshot
-    const att = this.getAttendanceByRollNumber(data.studentRollNumber);
-    const activeDataset = this.datasets.find((d) => d.isActive) || this.datasets[0];
-    const calc = att
+    const attendance = this.getAttendanceByRollNumber(
+      data.studentRollNumber
+    );
+
+    const activeDataset =
+      this.datasets.find((dataset) => dataset.isActive) ||
+      this.datasets[0];
+
+    const calculation = attendance
       ? calculateAttendanceEligibility(
-          att.classesAttended,
-          att.classesConducted,
+          attendance.classesAttended,
+          attendance.classesConducted,
           this.settings.attendanceThreshold,
-          att.lastVerifiedAt,
+          attendance.lastVerifiedAt,
           this.settings.dataStalenessDays
         )
       : {
@@ -500,23 +671,30 @@ class EventPassStore {
           isStale: false,
         };
 
-    const newRefNumber = `EP-2026-${(this.requests.length + 1).toString().padStart(3, '0')}`;
+    const referenceNumber = `EP-2026-${(
+      this.requests.length + 1
+    )
+      .toString()
+      .padStart(3, '0')}`;
+
     const now = new Date().toISOString();
 
     const newRequest: EventRequest = {
       ...data,
       id: `req-${Date.now()}`,
-      referenceNumber: newRefNumber,
+      referenceNumber,
       attendanceSnapshot: {
-        percentage: calc.percentage,
-        classesAttended: att?.classesAttended ?? 0,
-        classesConducted: att?.classesConducted ?? 0,
+        percentage: calculation.percentage,
+        classesAttended: attendance?.classesAttended ?? 0,
+        classesConducted: attendance?.classesConducted ?? 0,
         threshold: this.settings.attendanceThreshold,
-        isEligible: calc.isEligible,
-        statusText: calc.statusText,
+        isEligible: calculation.isEligible,
+        statusText: calculation.statusText,
         calculatedAt: now,
-        datasetVersion: activeDataset ? activeDataset.version : 'v1.0.0',
-        isStale: calc.isStale,
+        datasetVersion: activeDataset
+          ? activeDataset.version
+          : 'v1.0.0',
+        isStale: calculation.isStale,
       },
       status: 'Under Proctor Review',
       proctorReview: null,
@@ -536,14 +714,13 @@ class EventPassStore {
       targetType: 'request',
       targetId: newRequest.id,
       details: {
-        referenceNumber: newRefNumber,
+        referenceNumber,
         title: newRequest.title,
-        attendancePercentage: calc.percentage,
-        isEligible: calc.isEligible,
+        attendancePercentage: calculation.percentage,
+        isEligible: calculation.isEligible,
       },
     });
 
-    // Notify assigned proctor
     if (actor.assignedProctorId) {
       this.createNotification({
         recipientUid: actor.assignedProctorId,
@@ -563,29 +740,34 @@ class EventPassStore {
     updates: Partial<EventRequest>,
     actor: UserProfile
   ): EventRequest {
-    const idx = this.requests.findIndex((r) => r.id === id);
-    if (idx === -1) throw new Error('Request not found');
+    const idx = this.requests.findIndex((request) => request.id === id);
+
+    if (idx === -1) {
+      throw new Error('Request not found');
+    }
 
     const current = this.requests[idx];
 
-    // Check ownership
     if (actor.role === 'student' && current.studentUid !== actor.uid) {
-      throw new Error('Forbidden: You can only edit your own requests.');
+      throw new Error(
+        'Forbidden: You can only edit your own requests.'
+      );
     }
 
-    // Check editability: students can only edit Draft or Returned for Correction
     if (
       actor.role === 'student' &&
       current.status !== 'Draft' &&
       current.status !== 'Returned for Correction'
     ) {
-      throw new Error(`Cannot edit request in status '${current.status}'.`);
+      throw new Error(
+        `Cannot edit request in status '${current.status}'.`
+      );
     }
 
-    let nextStatus = current.status;
-    if (current.status === 'Returned for Correction') {
-      nextStatus = 'Under Proctor Review'; // Resubmit
-    }
+    const nextStatus =
+      current.status === 'Returned for Correction'
+        ? 'Under Proctor Review'
+        : current.status;
 
     this.requests[idx] = {
       ...current,
@@ -615,30 +797,54 @@ class EventPassStore {
 
   public submitProctorReview(
     id: string,
-    decision: 'recommend_approval' | 'recommend_rejection' | 'return_for_correction',
+    decision:
+      | 'recommend_approval'
+      | 'recommend_rejection'
+      | 'return_for_correction',
     remarks: string,
     proctorActor: UserProfile
   ): EventRequest {
-    if (proctorActor.role !== 'proctor' && proctorActor.role !== 'incharge' && proctorActor.role !== 'admin') {
-      throw new Error('Unauthorized: Only assigned Proctors or In-Charge can submit reviews.');
+    if (
+      proctorActor.role !== 'proctor' &&
+      proctorActor.role !== 'incharge' &&
+      proctorActor.role !== 'admin'
+    ) {
+      throw new Error(
+        'Unauthorized: Only assigned Proctors or In-Charge can submit reviews.'
+      );
     }
 
-    const idx = this.requests.findIndex((r) => r.id === id);
-    if (idx === -1) throw new Error('Request not found');
+    const idx = this.requests.findIndex((request) => request.id === id);
+
+    if (idx === -1) {
+      throw new Error('Request not found');
+    }
 
     const current = this.requests[idx];
 
     let targetStatus: EventStatus;
-    if (decision === 'recommend_approval') targetStatus = 'Recommended for Approval';
-    else if (decision === 'recommend_rejection') targetStatus = 'Recommended for Rejection';
-    else targetStatus = 'Returned for Correction';
 
-    const validation = validateTransition(current.status, targetStatus, 'proctor', remarks);
+    if (decision === 'recommend_approval') {
+      targetStatus = 'Recommended for Approval';
+    } else if (decision === 'recommend_rejection') {
+      targetStatus = 'Recommended for Rejection';
+    } else {
+      targetStatus = 'Returned for Correction';
+    }
+
+    const validation = validateTransition(
+      current.status,
+      targetStatus,
+      'proctor',
+      remarks
+    );
+
     if (!validation.allowed) {
       throw new Error(validation.reason);
     }
 
     const now = new Date().toISOString();
+
     this.requests[idx] = {
       ...current,
       status: targetStatus,
@@ -649,7 +855,8 @@ class EventPassStore {
         remarks,
         reviewedAt: now,
       },
-      correctionRemarks: decision === 'return_for_correction' ? remarks : undefined,
+      correctionRemarks:
+        decision === 'return_for_correction' ? remarks : undefined,
       updatedAt: now,
       version: current.version + 1,
     };
@@ -657,7 +864,7 @@ class EventPassStore {
     this.recordAuditLog({
       actorUid: proctorActor.uid,
       actorName: proctorActor.displayName,
-      actorRole: 'proctor',
+      actorRole: proctorActor.role,
       action: 'PROCTOR_REVIEW_SUBMITTED',
       targetType: 'request',
       targetId: id,
@@ -669,15 +876,23 @@ class EventPassStore {
       },
     });
 
-    // Notify student
     this.createNotification({
       recipientUid: current.studentUid,
       title:
         decision === 'return_for_correction'
           ? 'Request Returned for Correction'
-          : `Proctor Recommendation: ${decision === 'recommend_approval' ? 'Recommended for Approval' : 'Recommended for Rejection'}`,
+          : `Proctor Recommendation: ${
+              decision === 'recommend_approval'
+                ? 'Recommended for Approval'
+                : 'Recommended for Rejection'
+            }`,
       message: `${proctorActor.displayName} has reviewed "${current.title}". Remarks: ${remarks}`,
-      type: decision === 'recommend_approval' ? 'success' : decision === 'return_for_correction' ? 'warning' : 'alert',
+      type:
+        decision === 'recommend_approval'
+          ? 'success'
+          : decision === 'return_for_correction'
+          ? 'warning'
+          : 'alert',
       link: `/student/requests/${current.id}`,
     });
 
@@ -694,14 +909,24 @@ class EventPassStore {
     inchargeActor?: UserProfile
   ): EventRequest {
     const actor = inchargeActor || this.currentUser;
-    if (!actor || (actor.role !== 'incharge' && actor.role !== 'admin')) {
-      throw new Error('Unauthorized: Only Technical-Event In-Charge can make final decisions.');
+
+    if (
+      !actor ||
+      (actor.role !== 'incharge' && actor.role !== 'admin')
+    ) {
+      throw new Error(
+        'Unauthorized: Only Technical-Event In-Charge can make final decisions.'
+      );
     }
 
-    const idx = this.requests.findIndex((r) => r.id === id);
-    if (idx === -1) throw new Error('Request not found');
+    const idx = this.requests.findIndex((request) => request.id === id);
+
+    if (idx === -1) {
+      throw new Error('Request not found');
+    }
 
     const current = this.requests[idx];
+
     const targetStatus: EventStatus =
       decision === 'Approved'
         ? 'Approved'
@@ -709,16 +934,25 @@ class EventPassStore {
         ? 'Rejected'
         : 'Returned for Correction';
 
-    const validation = validateTransition(current.status, targetStatus, 'incharge', remarks);
+    const validation = validateTransition(
+      current.status,
+      targetStatus,
+      'incharge',
+      remarks
+    );
+
     if (!validation.allowed) {
       throw new Error(validation.reason);
     }
 
-    if (isOverride && (!overrideReason || overrideReason.trim().length === 0)) {
-      throw new Error('An explicit justification reason is required when overriding attendance eligibility.');
+    if (isOverride && (!overrideReason || !overrideReason.trim())) {
+      throw new Error(
+        'An explicit justification reason is required when overriding attendance eligibility.'
+      );
     }
 
     const now = new Date().toISOString();
+
     this.requests[idx] = {
       ...current,
       status: targetStatus,
@@ -732,7 +966,8 @@ class EventPassStore {
         decidedAt: now,
       },
       rejectionReason: decision === 'Rejected' ? remarks : undefined,
-      correctionRemarks: decision === 'Returned' ? remarks : undefined,
+      correctionRemarks:
+        decision === 'Returned' ? remarks : undefined,
       updatedAt: now,
       version: current.version + 1,
     };
@@ -740,7 +975,7 @@ class EventPassStore {
     this.recordAuditLog({
       actorUid: actor.uid,
       actorName: actor.displayName,
-      actorRole: 'incharge',
+      actorRole: actor.role,
       action: 'FINAL_DECISION_EXECUTED',
       targetType: 'request',
       targetId: id,
@@ -755,12 +990,16 @@ class EventPassStore {
       },
     });
 
-    // Notify student
     this.createNotification({
       recipientUid: current.studentUid,
       title: `Event Request ${decision}`,
       message: `Your request "${current.title}" was ${decision.toLowerCase()} by ${actor.displayName}. Remarks: ${remarks}`,
-      type: decision === 'Approved' ? 'success' : decision === 'Rejected' ? 'alert' : 'warning',
+      type:
+        decision === 'Approved'
+          ? 'success'
+          : decision === 'Rejected'
+          ? 'alert'
+          : 'warning',
       link: `/student/requests/${current.id}`,
     });
 
@@ -768,25 +1007,38 @@ class EventPassStore {
     return this.requests[idx];
   }
 
-  public withdrawEventRequest(id: string, studentActor: UserProfile): EventRequest {
-    const idx = this.requests.findIndex((r) => r.id === id);
-    if (idx === -1) throw new Error('Request not found');
+  public withdrawEventRequest(
+    id: string,
+    studentActor: UserProfile
+  ): EventRequest {
+    const idx = this.requests.findIndex((request) => request.id === id);
 
-    const current = this.requests[idx];
-    if (current.studentUid !== studentActor.uid) {
-      throw new Error('Unauthorized: You cannot withdraw another student\'s request.');
+    if (idx === -1) {
+      throw new Error('Request not found');
     }
 
-    const validation = validateTransition(current.status, 'Withdrawn', 'student');
+    const current = this.requests[idx];
+
+    if (current.studentUid !== studentActor.uid) {
+      throw new Error(
+        'Unauthorized: You cannot withdraw another student\'s request.'
+      );
+    }
+
+    const validation = validateTransition(
+      current.status,
+      'Withdrawn',
+      'student'
+    );
+
     if (!validation.allowed) {
       throw new Error(validation.reason);
     }
 
-    const now = new Date().toISOString();
     this.requests[idx] = {
       ...current,
       status: 'Withdrawn',
-      updatedAt: now,
+      updatedAt: new Date().toISOString(),
       version: current.version + 1,
     };
 
@@ -797,7 +1049,10 @@ class EventPassStore {
       action: 'EVENT_REQUEST_WITHDRAWN',
       targetType: 'request',
       targetId: id,
-      details: { referenceNumber: current.referenceNumber, previousStatus: current.status },
+      details: {
+        referenceNumber: current.referenceNumber,
+        previousStatus: current.status,
+      },
     });
 
     this.persistAll();
@@ -805,42 +1060,63 @@ class EventPassStore {
   }
 
   // Audit Logs
+
   public getAuditLogs(): AuditLog[] {
     return [...this.auditLogs].sort(
-      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+      (a, b) =>
+        new Date(b.timestamp).getTime() -
+        new Date(a.timestamp).getTime()
     );
   }
 
-  public recordAuditLog(entry: Omit<AuditLog, 'id' | 'timestamp'>): void {
+  public recordAuditLog(
+    entry: Omit<AuditLog, 'id' | 'timestamp'>
+  ): void {
     const log: AuditLog = {
       ...entry,
-      id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      id: `log-${Date.now()}-${Math.random()
+        .toString(36)
+        .substr(2, 5)}`,
       timestamp: new Date().toISOString(),
     };
+
     this.auditLogs.unshift(log);
     setStorageItem('audit_logs', this.auditLogs);
   }
 
   // Notifications
+
   public getNotifications(recipientUid: string): NotificationItem[] {
     return this.notifications
-      .filter((n) => n.recipientUid === recipientUid)
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      .filter((notification) => notification.recipientUid === recipientUid)
+      .sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() -
+          new Date(a.createdAt).getTime()
+      );
   }
 
-  public createNotification(entry: Omit<NotificationItem, 'id' | 'isRead' | 'createdAt'>): void {
-    const notif: NotificationItem = {
+  public createNotification(
+    entry: Omit<NotificationItem, 'id' | 'isRead' | 'createdAt'>
+  ): void {
+    const notification: NotificationItem = {
       ...entry,
-      id: `notif-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      id: `notif-${Date.now()}-${Math.random()
+        .toString(36)
+        .substr(2, 5)}`,
       isRead: false,
       createdAt: new Date().toISOString(),
     };
-    this.notifications.unshift(notif);
+
+    this.notifications.unshift(notification);
     setStorageItem('notifications', this.notifications);
   }
 
   public markNotificationAsRead(id: string): void {
-    const idx = this.notifications.findIndex((n) => n.id === id);
+    const idx = this.notifications.findIndex(
+      (notification) => notification.id === id
+    );
+
     if (idx !== -1) {
       this.notifications[idx].isRead = true;
       setStorageItem('notifications', this.notifications);
@@ -848,9 +1124,12 @@ class EventPassStore {
   }
 
   public markAllNotificationsAsRead(recipientUid: string): void {
-    this.notifications.forEach((n) => {
-      if (n.recipientUid === recipientUid) n.isRead = true;
+    this.notifications.forEach((notification) => {
+      if (notification.recipientUid === recipientUid) {
+        notification.isRead = true;
+      }
     });
+
     setStorageItem('notifications', this.notifications);
   }
 }

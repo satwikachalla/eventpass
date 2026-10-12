@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { eventPassStore } from '@/lib/store';
@@ -24,9 +24,52 @@ import {
 
 export const InchargeDashboard: React.FC = () => {
   const { currentUser } = useAuth();
+  const [selectedStudentId, setSelectedStudentId] = useState('');
+  const [selectedProctorId, setSelectedProctorId] = useState('');
+  const [assignmentMessage, setAssignmentMessage] = useState('');
+  const [assignmentVersion, setAssignmentVersion] = useState(0);
 
   const allRequests = useMemo(() => eventPassStore.getEventRequests(), []);
-  const allStudents = useMemo(() => eventPassStore.getUsers().filter((u) => u.role === 'student'), []);
+  const allUsers = useMemo(
+  () => eventPassStore.getUsers(),
+  [assignmentVersion]
+);
+
+const allStudents = allUsers.filter((u) => u.role === 'student');
+
+const allProctors = allUsers.filter((u) => u.role === 'proctor');
+
+const unassignedStudents = allStudents.filter(
+  (student) => !student.assignedProctorId
+);
+const handleAssignProctor = () => {
+  if (!currentUser) {
+    setAssignmentMessage('Please sign in again before assigning a proctor.');
+    return;
+  }
+
+  if (!selectedStudentId || !selectedProctorId) {
+    setAssignmentMessage('Please select both a student and a proctor.');
+    return;
+  }
+
+  try {
+    eventPassStore.assignProctorToStudent(
+      selectedStudentId,
+      selectedProctorId,
+      currentUser
+    );
+
+    setSelectedStudentId('');
+setSelectedProctorId('');
+setAssignmentVersion((version) => version + 1);
+setAssignmentMessage('Proctor assigned successfully!');
+  } catch (error) {
+    setAssignmentMessage(
+      error instanceof Error ? error.message : 'Could not assign the proctor.'
+    );
+  }
+};
   const attendanceRecords = useMemo(() => eventPassStore.getAttendanceRecords(), []);
   const datasets = useMemo(() => eventPassStore.getAttendanceDatasets(), []);
   const settings = useMemo(() => eventPassStore.getDepartmentSettings(), []);
@@ -178,6 +221,121 @@ export const InchargeDashboard: React.FC = () => {
           </div>
         </div>
       </div>
+      
+      {/* Assign Proctors to Unassigned Students */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm flex items-center gap-2">
+            <ClipboardList className="w-4 h-4 text-brand-600" />
+            Assign Proctors to Students
+          </CardTitle>
+        </CardHeader>
+
+        <CardContent className="space-y-4">
+          <p className="text-sm text-slate-500">
+            Assign an existing proctor to a student who does not currently have one.
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label
+                htmlFor="student-assignment"
+                className="block text-sm font-medium mb-2"
+              >
+                Unassigned Student
+              </label>
+              <select
+                id="student-assignment"
+                value={selectedStudentId}
+                onChange={(e) => {
+                  setSelectedStudentId(e.target.value);
+                  setAssignmentMessage('');
+                }}
+                className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-navy-900 px-3 py-2.5 text-sm"
+              >
+                <option value="">Choose a student</option>
+                {unassignedStudents.map((student) => (
+                  <option key={student.uid} value={student.uid}>
+                    {student.displayName} ({student.email})
+                  </option>
+                ))}
+              </select>
+
+              {unassignedStudents.length === 0 && (
+                <p className="mt-2 text-xs text-emerald-600">
+                  All registered students currently have a proctor assigned.
+                </p>
+              )}
+            </div>
+
+            <div>
+              <label
+                htmlFor="proctor-assignment"
+                className="block text-sm font-medium mb-2"
+              >
+                Available Proctor
+              </label>
+              <select
+                id="proctor-assignment"
+                value={selectedProctorId}
+                onChange={(e) => {
+                  setSelectedProctorId(e.target.value);
+                  setAssignmentMessage('');
+                }}
+                className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-navy-900 px-3 py-2.5 text-sm"
+              >
+                <option value="">Choose a proctor</option>
+                {allProctors.map((proctor) => (
+                  <option key={proctor.uid} value={proctor.uid}>
+                    {proctor.displayName} ({proctor.email})
+                  </option>
+                ))}
+              </select>
+
+              {allProctors.length === 0 && (
+                <p className="mt-2 text-xs text-amber-600">
+                  No proctors were found in the user list.
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+            <Button
+              variant="primary"
+              size="md"
+              onClick={handleAssignProctor}
+              disabled={
+                !selectedStudentId ||
+                !selectedProctorId ||
+                unassignedStudents.length === 0 ||
+                allProctors.length === 0
+              }
+            >
+              Assign Proctor
+            </Button>
+
+            {assignmentMessage && (
+              <p
+                role="status"
+                className={`text-sm ${
+                  assignmentMessage === 'Proctor assigned successfully!'
+                    ? 'text-emerald-600'
+                    : 'text-rose-600'
+                }`}
+              >
+                {assignmentMessage}
+              </p>
+            )}
+          </div>
+
+          <div className="border-t border-slate-100 dark:border-slate-800 pt-3">
+            <p className="text-xs text-slate-500">
+              Unassigned students remaining: {unassignedStudents.length}
+            </p>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Analytics Visualizations */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

@@ -19,8 +19,8 @@ export const INITIAL_SETTINGS: DepartmentSettings = {
 export const INITIAL_PROCTORS: UserProfile[] = [
   {
     uid: 'proctor-001',
-    email: 'rajesh.kumar@college.edu',
-    displayName: 'Dr. Rajesh Kumar',
+    email: 'mdtasleema25@gmail.com',
+    displayName: 'Md. Tasleema',
     role: 'proctor',
     department: 'Computer Science & Engineering',
     isProfileComplete: true,
@@ -37,12 +37,23 @@ export const INITIAL_PROCTORS: UserProfile[] = [
     createdAt: '2026-08-01T09:00:00.000Z',
     updatedAt: '2026-08-01T09:00:00.000Z',
   },
+  // DEMO ONLY: replace the email below with the authorized proctor's Google email.
+  {
+    uid: 'proctor-003',
+    email: 'hw574888@gmail.com',
+    displayName: 'Demo Proctor',
+    role: 'proctor',
+    department: 'Computer Science & Engineering',
+    isProfileComplete: true,
+    createdAt: '2026-10-12T00:00:00.000Z',
+    updatedAt: '2026-10-12T00:00:00.000Z',
+  },
 ];
 
 export const INITIAL_INCHARGE: UserProfile = {
   uid: 'incharge-001',
-  email: 'ramesh.iyer@college.edu',
-  displayName: 'Dr. Ramesh Iyer',
+  email: 'mdtasleema28@gmail.com',
+  displayName: 'Mohammed T',
   role: 'incharge',
   department: 'Computer Science & Engineering',
   isProfileComplete: true,
@@ -74,7 +85,14 @@ const studentNames = [
 export const INITIAL_STUDENTS: UserProfile[] = studentNames.map((name, idx) => {
   const num = (idx + 1).toString().padStart(3, '0');
   const isFirstBatch = idx < 15;
-  const assignedProctor = isFirstBatch ? INITIAL_PROCTORS[0] : INITIAL_PROCTORS[1];
+  // Leave the last five demo students unassigned so In-Charge
+// can assign them from the dashboard.
+const assignedProctor =
+  idx >= 25
+    ? null
+    : isFirstBatch
+      ? INITIAL_PROCTORS[0]
+      : INITIAL_PROCTORS[1];
   const dept = idx % 2 === 0 ? 'Computer Science & Engineering' : 'Information Technology';
   const section = idx % 4 < 2 ? 'A' : 'B';
   const year = idx < 20 ? '3rd Year' : '4th Year';
@@ -88,8 +106,8 @@ export const INITIAL_STUDENTS: UserProfile[] = studentNames.map((name, idx) => {
     department: dept,
     academicYear: year,
     section: section,
-    assignedProctorId: assignedProctor.uid,
-    assignedProctorName: assignedProctor.displayName,
+    assignedProctorId: assignedProctor?.uid,
+    assignedProctorName: assignedProctor?.displayName,
     isProfileComplete: true,
     createdAt: '2026-08-15T10:00:00.000Z',
     updatedAt: '2026-08-15T10:00:00.000Z',
