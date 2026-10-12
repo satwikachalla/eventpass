@@ -5,15 +5,21 @@ import path from 'path'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+
+  // GitHub Pages
+  base: '/eventpass/',
+
   server: {
     host: '0.0.0.0',
     port: 5173,
   },
+
   resolve: {
     alias: {
       '@': path.resolve(import.meta.dirname, './src'),
     },
   },
+
   test: {
     globals: true,
     environment: 'jsdom',
