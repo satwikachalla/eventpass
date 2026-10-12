@@ -1,3 +1,4 @@
+
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import path from 'path'
@@ -6,8 +7,8 @@ import path from 'path'
 export default defineConfig({
   plugins: [react()],
 
-  // GitHub Pages
-  base: '/eventpass/',
+  // Vercel deployment
+  base: '/',
 
   server: {
     host: '0.0.0.0',
