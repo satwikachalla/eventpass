@@ -31,7 +31,7 @@ import { HelpPage } from '@/pages/HelpPage';
 
 function App() {
   return (
-    <BrowserRouter basename="/eventpass">
+    <BrowserRouter>
       <ToastProvider>
         <AuthProvider>
           <Routes>
