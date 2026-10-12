@@ -1,8 +1,4 @@
-import React, {
-  useEffect,
-  useMemo,
-  useState,
-} from 'react';
+import React from 'react';
 
 import {
   Link,
@@ -21,6 +17,7 @@ import {
 
 import { useAuth } from '@/context/AuthContext';
 import { eventPassStore } from '@/lib/store';
+import { useEventPassStoreVersion } from '@/lib/useEventPassStoreVersion';
 
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -35,57 +32,21 @@ import {
 export const StudentDashboard: React.FC = () => {
   const { currentUser } =
     useAuth();
+  useEventPassStoreVersion();
 
-  const [, forceRefresh] =
-    useState(0);
-
-  /*
-   * Real-time local data refresh.
-   *
-   * When attendance/import/request data changes,
-   * the dashboard refreshes automatically.
-   *
-   * Replace this polling with Firestore
-   * onSnapshot() when your production database
-   * is connected.
-   */
-  useEffect(() => {
-    const interval =
-      window.setInterval(() => {
-        forceRefresh(
-          (value) => value + 1
-        );
-      }, 5000);
-
-    return () =>
-      window.clearInterval(
-        interval
-      );
-  }, []);
-
-  const attendance = useMemo(() => {
-    if (!currentUser?.rollNumber) {
-      return null;
-    }
-
-    return eventPassStore.getAttendanceByRollNumber(
-      currentUser.rollNumber
-    );
-  }, [currentUser]);
+  const attendance = currentUser?.rollNumber
+    ? eventPassStore.getAttendanceByRollNumber(currentUser.rollNumber)
+    : null;
 
   const settings =
     eventPassStore.getDepartmentSettings();
 
-  const requests = useMemo(() => {
-    if (!currentUser) {
-      return [];
-    }
-
-    return eventPassStore.getEventRequests({
+  const requests = currentUser
+    ? eventPassStore.getEventRequests({
       role: 'student',
       userUid: currentUser.uid,
-    });
-  }, [currentUser]);
+    })
+    : [];
 
   const total =
     requests.length;

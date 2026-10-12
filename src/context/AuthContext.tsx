@@ -16,9 +16,16 @@ import {
 
 import {
   auth,
+  db,
   googleProvider,
   isFirebaseConfigured,
 } from '@/lib/firebase';
+
+import {
+  doc,
+  getDoc,
+  setDoc,
+} from 'firebase/firestore';
 
 import {
   UserProfile,
@@ -30,9 +37,6 @@ import {
 } from '@/lib/store';
 
 import {
-  INITIAL_ADMIN,
-  INITIAL_INCHARGE,
-  INITIAL_PROCTORS,
   INITIAL_STUDENTS,
 } from '@/lib/mockData';
 
@@ -58,111 +62,80 @@ interface AuthContextType {
 const AuthContext =
   createContext<AuthContextType | undefined>(undefined);
 
-/**
- * Resolve the profile for a signed-in Firebase user.
- *
- * IMPORTANT:
- * This prioritizes the project's hardcoded sample staff accounts before
- * looking at a profile stored locally. That prevents an old local student
- * profile for a sample staff email from masking the sample staff role.
- *
- * This is suitable only for the existing demo/sample-account setup.
- * For production, resolve roles from an authoritative Firestore document or
- * Firebase custom claims, and enforce access in backend/Firestore rules.
- */
-function resolveExistingRole(
-  firebaseUser: FirebaseUser
-): UserProfile {
-  const email = (firebaseUser.email || '').trim().toLowerCase();
+const userRoles: UserRole[] = [
+  'student',
+  'proctor',
+  'incharge',
+  'admin',
+];
 
-  const withFirebaseIdentity = (
-    profile: UserProfile
-  ): UserProfile => ({
-    ...profile,
-    uid: firebaseUser.uid,
-    email: firebaseUser.email || profile.email,
-    displayName:
-      firebaseUser.displayName || profile.displayName,
-    photoURL:
-      firebaseUser.photoURL || profile.photoURL,
-  });
+function profileDate(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (value && typeof (value as { toDate?: () => Date }).toDate === 'function') {
+    return (value as { toDate: () => Date }).toDate().toISOString();
+  }
+  return new Date().toISOString();
+}
 
-  /*
-   * Check known sample staff accounts FIRST.
-   * This order is intentional: an old local profile must not override these
-   * sample mappings merely because its email matches.
-   */
-  const proctor = INITIAL_PROCTORS.find(
-    (user) => user.email.trim().toLowerCase() === email
-  );
-
-  if (proctor) {
-    const updated = withFirebaseIdentity(proctor);
-    eventPassStore.setCurrentUser(updated);
-    return updated;
+async function resolveFirebaseProfile(
+  firebaseUser: FirebaseUser,
+  allowStudentRegistration = false
+): Promise<UserProfile> {
+  if (!db) {
+    throw new Error('Firebase profile storage is unavailable.');
   }
 
-  if (INITIAL_INCHARGE.email.trim().toLowerCase() === email) {
-    const updated = withFirebaseIdentity(INITIAL_INCHARGE);
-    eventPassStore.setCurrentUser(updated);
-    return updated;
-  }
+  const profileRef = doc(db, 'users', firebaseUser.uid);
+  const profileSnapshot = await getDoc(profileRef);
 
-  if (INITIAL_ADMIN.email.trim().toLowerCase() === email) {
-    const updated = withFirebaseIdentity(INITIAL_ADMIN);
-    eventPassStore.setCurrentUser(updated);
-    return updated;
-  }
+  if (profileSnapshot.exists()) {
+    const data = profileSnapshot.data();
+    if (
+      data.uid !== firebaseUser.uid ||
+      !userRoles.includes(data.role) ||
+      (firebaseUser.email && data.email?.toLowerCase() !== firebaseUser.email.toLowerCase())
+    ) {
+      throw new Error('The account profile is invalid or does not match this sign-in.');
+    }
 
-  /*
-   * For non-sample accounts, preserve an existing profile.
-   * UID is checked before email to avoid accidentally matching a different
-   * account that happens to share an email value in local demo data.
-   */
-  const existingById =
-    eventPassStore.getUserById(firebaseUser.uid);
-
-  if (existingById) {
-    eventPassStore.setCurrentUser(existingById);
-    return existingById;
-  }
-
-  const existingByEmail =
-    eventPassStore.getUserByEmail(email);
-
-  if (existingByEmail) {
-    const updated = withFirebaseIdentity(existingByEmail);
-    eventPassStore.setCurrentUser(updated);
-    return updated;
-  }
-
-  /*
-   * Match the supplied sample student accounts.
-   */
-  const student = INITIAL_STUDENTS.find(
-    (user) => user.email.trim().toLowerCase() === email
-  );
-
-  if (student) {
-    const updated = withFirebaseIdentity(student);
-    eventPassStore.setCurrentUser(updated);
-    return updated;
-  }
-
-  /*
-   * Unknown Firebase accounts are registered as students in this demo.
-   * Do not use this fallback to grant staff access in production.
-   */
-  const created =
-    eventPassStore.createOrRegisterUser({
+    const profile = {
+      ...data,
       uid: firebaseUser.uid,
-      email: firebaseUser.email || '',
-      displayName: firebaseUser.displayName || '',
-      photoURL: firebaseUser.photoURL || undefined,
-    });
+      email: firebaseUser.email || data.email,
+      displayName: firebaseUser.displayName || data.displayName,
+      photoURL: firebaseUser.photoURL || data.photoURL,
+      createdAt: profileDate(data.createdAt),
+      updatedAt: profileDate(data.updatedAt),
+    } as UserProfile;
 
-  eventPassStore.setCurrentUser(created);
-  return created;
+    return eventPassStore.syncAuthenticatedUser(profile);
+  }
+
+  if (!allowStudentRegistration || !firebaseUser.email) {
+    throw new Error('No authorized role profile exists for this account.');
+  }
+
+  const knownStudent = INITIAL_STUDENTS.find(
+    (student) => student.email.toLowerCase() === firebaseUser.email!.toLowerCase()
+  );
+  const now = new Date().toISOString();
+  const studentProfile: UserProfile = {
+    ...(knownStudent || {} as UserProfile),
+    uid: firebaseUser.uid,
+    email: firebaseUser.email,
+    displayName: firebaseUser.displayName || knownStudent?.displayName || firebaseUser.email.split('@')[0],
+    role: 'student',
+    isProfileComplete: knownStudent?.isProfileComplete || false,
+    photoURL: firebaseUser.photoURL || undefined,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const profileData = Object.fromEntries(
+    Object.entries(studentProfile).filter(([, value]) => value !== undefined)
+  );
+  await setDoc(profileRef, profileData);
+  return eventPassStore.syncAuthenticatedUser(studentProfile);
 }
 
 export const AuthProvider: React.FC<{
@@ -183,10 +156,13 @@ export const AuthProvider: React.FC<{
 
     const unsubscribe = onAuthStateChanged(
       auth,
-      (firebaseUser) => {
+      async (firebaseUser) => {
         try {
           if (firebaseUser) {
-            const profile = resolveExistingRole(firebaseUser);
+            const isGoogleAccount = firebaseUser.providerData.some(
+              (provider) => provider.providerId === 'google.com'
+            );
+            const profile = await resolveFirebaseProfile(firebaseUser, isGoogleAccount);
             setCurrentUser(profile);
           } else {
             eventPassStore.setCurrentUser(null);
@@ -194,6 +170,7 @@ export const AuthProvider: React.FC<{
           }
         } catch (error) {
           console.error('Session initialization failed:', error);
+          if (auth) await firebaseSignOut(auth);
           setCurrentUser(null);
         } finally {
           setIsLoading(false);
@@ -215,7 +192,7 @@ export const AuthProvider: React.FC<{
 
     try {
       const result = await signInWithPopup(auth, googleProvider);
-      const profile = resolveExistingRole(result.user);
+      const profile = await resolveFirebaseProfile(result.user, true);
       setCurrentUser(profile);
       return profile;
     } finally {
@@ -246,7 +223,7 @@ export const AuthProvider: React.FC<{
         password
       );
 
-      const profile = resolveExistingRole(result.user);
+      const profile = await resolveFirebaseProfile(result.user);
       setCurrentUser(profile);
       return profile;
     } finally {

@@ -1,7 +1,28 @@
-import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, connectAuthEmulator, Auth } from 'firebase/auth';
-import { getFirestore, connectFirestoreEmulator, Firestore } from 'firebase/firestore';
-import { getStorage, connectStorageEmulator, FirebaseStorage } from 'firebase/storage';
+import {
+  initializeApp,
+  getApps,
+  getApp,
+  FirebaseApp,
+} from 'firebase/app';
+
+import {
+  getAuth,
+  GoogleAuthProvider,
+  connectAuthEmulator,
+  Auth,
+} from 'firebase/auth';
+
+import {
+  getFirestore,
+  connectFirestoreEmulator,
+  Firestore,
+} from 'firebase/firestore';
+
+import {
+  getStorage,
+  connectStorageEmulator,
+  FirebaseStorage,
+} from 'firebase/storage';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -12,41 +33,47 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
-// Check if valid Firebase credentials are provided
 export const isFirebaseConfigured = Boolean(
   firebaseConfig.apiKey &&
-  !firebaseConfig.apiKey.includes('your_firebase') &&
+  firebaseConfig.authDomain &&
   firebaseConfig.projectId &&
-  !firebaseConfig.projectId.includes('your_project')
+  firebaseConfig.appId
 );
 
 let app: FirebaseApp | undefined;
 let auth: Auth | undefined;
 let db: Firestore | undefined;
 let storage: FirebaseStorage | undefined;
+
 export const googleProvider = new GoogleAuthProvider();
-googleProvider.setCustomParameters({ prompt: 'select_account' });
+
+googleProvider.setCustomParameters({
+  prompt: 'select_account',
+});
 
 if (isFirebaseConfigured) {
   try {
-    app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+    app = getApps().length
+      ? getApp()
+      : initializeApp(firebaseConfig);
+
     auth = getAuth(app);
     db = getFirestore(app);
     storage = getStorage(app);
 
-    // Optional emulator hook
     if (import.meta.env.VITE_USE_FIREBASE_EMULATOR === 'true') {
-      try {
-        connectAuthEmulator(auth, 'http://localhost:9099');
-        connectFirestoreEmulator(db, 'localhost', 8080);
-        connectStorageEmulator(storage, 'localhost', 9199);
-      } catch (err) {
-        console.warn('Firebase emulator connection note:', err);
-      }
+      connectAuthEmulator(auth, 'http://localhost:9099');
+      connectFirestoreEmulator(db, 'localhost', 8080);
+      connectStorageEmulator(storage, 'localhost', 9199);
     }
   } catch (error) {
-    console.error('Failed to initialize Firebase with provided credentials:', error);
+    console.error('Firebase initialization failed:', error);
   }
 }
 
-export { app, auth, db, storage };
+export {
+  app,
+  auth,
+  db,
+  storage,
+};

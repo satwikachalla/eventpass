@@ -35,7 +35,7 @@ Built for hackathon demonstration with strict security boundaries, genuine atten
    - First-time users strictly receive `student` role by default.
    - Default-deny Firestore security rules (`firestore.rules`) and restricted Storage rules (`storage.rules`).
    - Server-side administrative bootstrap CLI script (`scripts/bootstrap-admin.js`) using Firebase Admin SDK.
-   - In-memory/localStorage persistent fallback with instant evaluator demo role switcher.
+   - In-memory/localStorage demo data; Firebase staff roles are resolved from UID-keyed Firestore profiles.
 
 5. **Certified Reports & Exports**
    - Download CSV and Excel registers for Event Requests, Master Attendance, Eligibility Compliance, and Import History.
@@ -171,7 +171,23 @@ To designate the initial administrator using Firebase Admin SDK:
 node scripts/bootstrap-admin.js admin@yourcollege.edu serviceAccountKey.json
 ```
 
-### 4. Firestore Demo Data Seeder
+### 4. Evaluator Demo Accounts
+Provision the proctor and in-charge with Firebase Admin credentials and the Firebase web API key for the same project. On Windows PowerShell:
+```powershell
+npm run provision:demo -- <firebase-web-api-key> <proctor-email> <incharge-email> [serviceAccountKey.json]
+```
+The script creates or refreshes Email/Password users with the existing demo UIDs `proctor-001` and `incharge-001`, writes the matching `users/{uid}` role profiles, then verifies both password sign-ins and role links before printing temporary passwords. Existing accounts with a different UID or role are rejected. Re-running rotates both passwords.
+
+After successful verification, add these **server-only** environment variables in the Vercel project and redeploy:
+- `EVENTPASS_DEMO_PROCTOR_EMAIL`
+- `EVENTPASS_DEMO_PROCTOR_PASSWORD`
+- `EVENTPASS_DEMO_INCHARGE_EMAIL`
+- `EVENTPASS_DEMO_INCHARGE_PASSWORD`
+- `EVENTPASS_DEMO_CREDENTIALS_PUBLIC=true`
+
+The homepage receives credentials from `/api/evaluator-credentials`; passwords are not stored in Firestore or frontend source. Keep the public flag unset until the script has succeeded. After evaluation, disable both accounts in Firebase Authentication and remove their Vercel variables (or rerun provisioning to rotate the passwords).
+
+### 5. Firestore Demo Data Seeder
 To seed 30 student records, 2 proctors, in-charge, and initial attendance datasets into Cloud Firestore:
 ```bash
 node scripts/seed-demo-data.js serviceAccountKey.json
@@ -179,33 +195,11 @@ node scripts/seed-demo-data.js serviceAccountKey.json
 
 ---
 
-## 🎯 5-Minute Evaluator & Judge Demo Walkthrough
+## 🎯 Evaluator Walkthrough
 
-Even without cloud credentials, EventPass features a turnkey **Demo Mode** with realistic persistent data and an instant **Role Switcher** in the top navigation bar:
-
-1. **Student Viewpoint (75.0% - Aarav Sharma)**:
-   - Click `Student (75%)` in the top bar.
-   - Notice Aarav's attendance is calculated as exactly **75.0%** (36/48 classes) and flagged as **Eligible**.
-   - Navigate to `Submit Event Request` and fill out an application. Test entering overlapping dates to view the real-time collision warning.
-2. **Student Viewpoint (<75% - Diya Patel)**:
-   - Click `Student (<75%)` in the top bar.
-   - Observe her 66.67% attendance marked as **Ineligible**.
-   - Click `My Requests` and view request `EP-2026-002` to inspect the In-Charge's rejection remarks.
-3. **Proctor Viewpoint (Dr. Rajesh Kumar)**:
-   - Click `Proctor 1` in the top bar.
-   - Review his portfolio of 15 assigned students.
-   - Click `Assigned Student Reviews` -> `Review Now` on Arjun Kapoor's ISRO visit request (`EP-2026-006`).
-   - Submit a recommendation with remarks. Proctors cannot issue final approval.
-4. **Technical-Event In-Charge Viewpoint (Dr. Ramesh Iyer)**:
-   - Click `In-Charge` in the top bar.
-   - View live departmental analytics: eligibility distribution, approval trends, and upcoming schedules.
-   - Go to `Request Final Decisions` and click `Finalize` on any pending application.
-   - If approving an ineligible student, notice the mandatory **Attendance Override Justification** field.
-   - Go to `Import Attendance` and upload a sample CSV/Excel file to inspect the row-by-row validation table.
-5. **Administrator Viewpoint**:
-   - Click `Admin` in the top bar.
-   - Go to `Role & User Management` to assign roles or re-map proctors.
-   - Click `Audit Trail` to view immutable, timestamped logs for all system operations.
+1. Use the homepage's **Demo Login for Evaluators** cards and sign in with the provisioned Proctor or In-Charge credentials. Their routes are selected from the verified Firestore role profile.
+2. Student sign-in remains Google-based. Google users without a profile are registered as students under their Firebase UID.
+3. Review the sample approval requests, attendance calculations, and proctor portfolio. The demo staff UIDs match the seeded local assignments and Firestore staff profile IDs.
 
 ---
 

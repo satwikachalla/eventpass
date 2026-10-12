@@ -1,27 +1,68 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/Button';
 import {
   Shield,
-  CheckCircle2,
   FileCheck,
   UploadCloud,
-  FileText,
   Lock,
-  ArrowRight,
   Sparkles,
+  Copy,
+  Check,
+  LogIn,
 } from 'lucide-react';
 
-export const LandingPage: React.FC = () => {
-const { signInWithGoogle, isFirebaseActive } = useAuth();  const navigate = useNavigate();
+interface DemoAccount {
+  email: string;
+  password: string;
+}
 
-  const handleLaunchRole = (role: 'student' | 'proctor' | 'incharge' | 'admin', uid?: string) => {
-  
-    if (role === 'student') navigate('/student/dashboard');
-    else if (role === 'proctor') navigate('/proctor/dashboard');
-    else if (role === 'incharge') navigate('/incharge/dashboard');
-    else navigate('/admin/users');
+interface DemoAccounts {
+  proctor: DemoAccount;
+  incharge: DemoAccount;
+}
+
+export const LandingPage: React.FC = () => {
+  const { signInWithGoogle } = useAuth();
+  const navigate = useNavigate();
+  const [demoAccounts, setDemoAccounts] = useState<DemoAccounts | null>(null);
+  const [credentialsLoading, setCredentialsLoading] = useState(true);
+  const [copiedCredential, setCopiedCredential] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    fetch('/api/evaluator-credentials')
+      .then((response) => {
+        if (!response.ok) throw new Error('Demo credentials are not enabled.');
+        return response.json();
+      })
+      .then((data: { accounts?: DemoAccounts }) => {
+        if (isMounted && data.accounts?.proctor && data.accounts?.incharge) {
+          setDemoAccounts(data.accounts);
+        }
+      })
+      .catch(() => {
+        if (isMounted) setDemoAccounts(null);
+      })
+      .finally(() => {
+        if (isMounted) setCredentialsLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const copyCredential = async (key: string, value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedCredential(key);
+      window.setTimeout(() => setCopiedCredential(null), 1800);
+    } catch {
+      setCopiedCredential(null);
+    }
   };
 
   return (
@@ -46,9 +87,9 @@ const { signInWithGoogle, isFirebaseActive } = useAuth();  const navigate = useN
           <Button
             variant="outline"
             size="sm"
-            onClick={() => handleLaunchRole('student', 'student-001')}
+            onClick={() => document.getElementById('evaluator-demos')?.scrollIntoView({ behavior: 'smooth' })}
           >
-            Launch Demo
+            Evaluator Login
           </Button>
           <Button
             variant="primary"
@@ -79,84 +120,56 @@ const { signInWithGoogle, isFirebaseActive } = useAuth();  const navigate = useN
           Seamless integration from student application to proctor review and In-Charge final sanction.
         </p>
 
-        {/* Evaluator Fast-Track Buttons */}
-        <div className="mt-10 bg-white dark:bg-navy-850 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-xl max-w-3xl mx-auto w-full">
-          <div className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-4">
-            Evaluator Fast-Track • Select User Viewpoint
+        <section id="evaluator-demos" className="mt-10 max-w-4xl mx-auto w-full text-left">
+          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2 mb-4">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wider text-brand-700 dark:text-brand-300">Evaluator Access</p>
+              <h2 className="text-xl font-bold text-slate-900 dark:text-white mt-1">Demo Login for Evaluators</h2>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Dedicated, role-verified Firebase accounts</p>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-            <button
-              onClick={() => handleLaunchRole('student', 'student-001')}
-              className="p-3.5 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-left hover:border-brand-500 hover:shadow-md transition-all group"
-            >
-              <div className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center justify-between">
-                <span>🎓 Student (Eligible)</span>
-                <ArrowRight className="w-3.5 h-3.5 text-brand-500 group-hover:translate-x-1 transition-transform" />
-              </div>
-              <p className="text-[11px] text-slate-500 mt-1">Aarav Sharma • 75.0% Attendance</p>
-            </button>
 
-            <button
-              onClick={() => handleLaunchRole('student', 'student-002')}
-              className="p-3.5 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-left hover:border-brand-500 hover:shadow-md transition-all group"
-            >
-              <div className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center justify-between">
-                <span>🎓 Student (Ineligible)</span>
-                <ArrowRight className="w-3.5 h-3.5 text-brand-500 group-hover:translate-x-1 transition-transform" />
-              </div>
-              <p className="text-[11px] text-slate-500 mt-1">Diya Patel • 66.7% Attendance</p>
-            </button>
-
-            <button
-              onClick={() => handleLaunchRole('proctor', 'proctor-001')}
-              className="p-3.5 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-left hover:border-brand-500 hover:shadow-md transition-all group"
-            >
-              <div className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center justify-between">
-                <span>👨‍🏫 Proctor 1</span>
-                <ArrowRight className="w-3.5 h-3.5 text-brand-500 group-hover:translate-x-1 transition-transform" />
-              </div>
-              <p className="text-[11px] text-slate-500 mt-1">Dr. Rajesh Kumar • 15 Assigned</p>
-            </button>
-
-            <button
-              onClick={() => handleLaunchRole('incharge')}
-              className="p-3.5 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-left hover:border-brand-500 hover:shadow-md transition-all group"
-            >
-              <div className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center justify-between">
-                <span>⚡ Event In-Charge</span>
-                <ArrowRight className="w-3.5 h-3.5 text-brand-500 group-hover:translate-x-1 transition-transform" />
-              </div>
-              <p className="text-[11px] text-slate-500 mt-1">Dr. Ramesh Iyer • Final Approver</p>
-            </button>
-
-            <button
-              onClick={() => handleLaunchRole('admin')}
-              className="p-3.5 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-left hover:border-brand-500 hover:shadow-md transition-all group"
-            >
-              <div className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center justify-between">
-                <span>🛡️ Administrator</span>
-                <ArrowRight className="w-3.5 h-3.5 text-brand-500 group-hover:translate-x-1 transition-transform" />
-              </div>
-              <p className="text-[11px] text-slate-500 mt-1">System Roles & Audit Logs</p>
-            </button>
-
-            <button
-              onClick={async () => {
-                await signInWithGoogle();
-                navigate('/student/dashboard');
-              }}
-              className="p-3.5 rounded-2xl border border-brand-300 dark:border-brand-700 bg-brand-50/50 dark:bg-brand-950/30 text-left hover:bg-brand-100/50 transition-all group"
-            >
-              <div className="text-xs font-bold text-brand-700 dark:text-brand-300 flex items-center justify-between">
-                <span>🔑 Google Sign In</span>
-                <ArrowRight className="w-3.5 h-3.5 text-brand-600 group-hover:translate-x-1 transition-transform" />
-              </div>
-              <p className="text-[11px] text-slate-500 mt-1">
-                {isFirebaseActive ? 'Connected to Firebase' : 'Simulate Google Account'}
-              </p>
-            </button>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {(['proctor', 'incharge'] as const).map((role) => {
+              const account = demoAccounts?.[role];
+              const title = role === 'proctor' ? 'Proctor Demo Account' : 'In-Charge Demo Account';
+              return (
+                <article key={role} className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-navy-850 p-5 shadow-subtle">
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">{title}</h3>
+                  {account ? (
+                    <>
+                      <div className="mt-4 space-y-3">
+                        {(['email', 'password'] as const).map((field) => {
+                          const value = account[field];
+                          const key = `${role}-${field}`;
+                          return (
+                            <div key={field}>
+                              <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">{field === 'email' ? 'Email' : 'Password'}</p>
+                              <div className="flex items-center gap-2">
+                                <code className="min-w-0 flex-1 truncate rounded-lg bg-slate-50 dark:bg-slate-900 px-3 py-2 text-xs text-slate-800 dark:text-slate-100">{value}</code>
+                                <button type="button" onClick={() => copyCredential(key, value)} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 px-2.5 py-2 text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:border-brand-400" aria-label={`Copy ${field}`}>
+                                  {copiedCredential === key ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                                  {copiedCredential === key ? 'Copied' : `Copy ${field === 'email' ? 'Email' : 'Password'}`}
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <Button variant="outline" size="sm" className="mt-4 w-full" leftIcon={<LogIn className="h-4 w-4" />} onClick={() => navigate('/login')}>
+                        Open sign in
+                      </Button>
+                    </>
+                  ) : (
+                    <p className="mt-3 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                      {credentialsLoading ? 'Checking evaluator account availability…' : 'Credentials will appear here after both Firebase demo accounts are provisioned and verified.'}
+                    </p>
+                  )}
+                </article>
+              );
+            })}
           </div>
-        </div>
+        </section>
 
         {/* Feature Highlights Grid */}
         <div className="mt-14 grid grid-cols-1 md:grid-cols-3 gap-6 text-left">

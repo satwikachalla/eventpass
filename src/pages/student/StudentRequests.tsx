@@ -1,7 +1,8 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { eventPassStore } from '@/lib/store';
+import { useEventPassStoreVersion } from '@/lib/useEventPassStoreVersion';
 import { EventRequest, EventStatus, EventCategory } from '@/types';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -20,17 +21,16 @@ import {
 
 export const StudentRequests: React.FC = () => {
   const { currentUser } = useAuth();
+  useEventPassStoreVersion();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
 
-  const allRequests = useMemo(() => {
-    if (!currentUser) return [];
-    return eventPassStore.getEventRequests({ role: 'student', userUid: currentUser.uid });
-  }, [currentUser]);
+  const allRequests = currentUser
+    ? eventPassStore.getEventRequests({ role: 'student', userUid: currentUser.uid })
+    : [];
 
-  const filteredRequests = useMemo(() => {
-    return allRequests.filter((r) => {
+  const filteredRequests = allRequests.filter((r) => {
       const matchSearch =
         searchTerm === '' ||
         r.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -42,7 +42,6 @@ export const StudentRequests: React.FC = () => {
 
       return matchSearch && matchStatus && matchCategory;
     });
-  }, [allRequests, searchTerm, statusFilter, categoryFilter]);
 
   const handleExportCsv = () => {
     const exportData = filteredRequests.map((r) => ({

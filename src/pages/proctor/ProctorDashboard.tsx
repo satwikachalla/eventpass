@@ -1,7 +1,8 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { eventPassStore } from '@/lib/store';
+import { useEventPassStoreVersion } from '@/lib/useEventPassStoreVersion';
 import { StatCard } from '@/components/ui/StatCard';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -21,21 +22,20 @@ import {
 
 export const ProctorDashboard: React.FC = () => {
   const { currentUser } = useAuth();
+  useEventPassStoreVersion();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
 
   // Find all students assigned to this proctor
-  const assignedStudents = useMemo(() => {
-    if (!currentUser) return [];
-    return eventPassStore.getUsers().filter((u) => u.assignedProctorId === currentUser.uid);
-  }, [currentUser]);
+  const assignedStudents = currentUser
+    ? eventPassStore.getUsers().filter((user) => user.assignedProctorId === currentUser.uid)
+    : [];
 
   // Find all requests belonging to assigned students
-  const proctorRequests = useMemo(() => {
-    if (!currentUser) return [];
-    return eventPassStore.getEventRequests({ role: 'proctor', userUid: currentUser.uid });
-  }, [currentUser]);
+  const proctorRequests = currentUser
+    ? eventPassStore.getEventRequests({ role: 'proctor', userUid: currentUser.uid })
+    : [];
 
   // Derived counts
   const pendingReviews = proctorRequests.filter(
@@ -59,8 +59,7 @@ export const ProctorDashboard: React.FC = () => {
   ).length;
 
   // Filtered requests list
-  const filteredRequests = useMemo(() => {
-    return proctorRequests.filter((r) => {
+  const filteredRequests = proctorRequests.filter((r) => {
       const matchSearch =
         searchTerm === '' ||
         r.studentName.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -73,7 +72,6 @@ export const ProctorDashboard: React.FC = () => {
 
       return matchSearch && matchStatus && matchCategory;
     });
-  }, [proctorRequests, searchTerm, statusFilter, categoryFilter]);
 
   const handleExportCsv = () => {
     const data = filteredRequests.map((r) => ({

@@ -1,7 +1,8 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { eventPassStore } from '@/lib/store';
+import { useEventPassStoreVersion } from '@/lib/useEventPassStoreVersion';
 import { StatCard } from '@/components/ui/StatCard';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -24,16 +25,12 @@ import {
 
 export const InchargeDashboard: React.FC = () => {
   const { currentUser } = useAuth();
+  useEventPassStoreVersion();
   const [selectedStudentId, setSelectedStudentId] = useState('');
   const [selectedProctorId, setSelectedProctorId] = useState('');
   const [assignmentMessage, setAssignmentMessage] = useState('');
-  const [assignmentVersion, setAssignmentVersion] = useState(0);
-
-  const allRequests = useMemo(() => eventPassStore.getEventRequests(), []);
-  const allUsers = useMemo(
-  () => eventPassStore.getUsers(),
-  [assignmentVersion]
-);
+  const allRequests = eventPassStore.getEventRequests();
+  const allUsers = eventPassStore.getUsers();
 
 const allStudents = allUsers.filter((u) => u.role === 'student');
 
@@ -62,7 +59,6 @@ const handleAssignProctor = () => {
 
     setSelectedStudentId('');
 setSelectedProctorId('');
-setAssignmentVersion((version) => version + 1);
 setAssignmentMessage('Proctor assigned successfully!');
   } catch (error) {
     setAssignmentMessage(
@@ -70,9 +66,9 @@ setAssignmentMessage('Proctor assigned successfully!');
     );
   }
 };
-  const attendanceRecords = useMemo(() => eventPassStore.getAttendanceRecords(), []);
-  const datasets = useMemo(() => eventPassStore.getAttendanceDatasets(), []);
-  const settings = useMemo(() => eventPassStore.getDepartmentSettings(), []);
+  const attendanceRecords = eventPassStore.getAttendanceRecords();
+  const datasets = eventPassStore.getAttendanceDatasets();
+  const settings = eventPassStore.getDepartmentSettings();
 
   // Summary Metrics strictly calculated from store
   const totalRequests = allRequests.length;
@@ -106,13 +102,11 @@ setAssignmentMessage('Proctor assigned successfully!');
   const activeDataset = datasets.find((d) => d.isActive) || datasets[0];
 
   // Category counts
-  const categoryCounts = useMemo(() => {
-    const map: Record<string, number> = {};
-    allRequests.forEach((r) => {
-      map[r.category] = (map[r.category] || 0) + 1;
-    });
-    return Object.entries(map);
-  }, [allRequests]);
+  const categoryMap: Record<string, number> = {};
+  allRequests.forEach((request) => {
+    categoryMap[request.category] = (categoryMap[request.category] || 0) + 1;
+  });
+  const categoryCounts = Object.entries(categoryMap);
 
   // Attendance eligibility distribution
   const eligibleStudentsCount = attendanceRecords.filter((r) => r.isEligible).length;

@@ -47,7 +47,7 @@ export const ProctorReview: React.FC = () => {
   }
 
   // Cross-student access restriction check: Proctor can only review assigned students!
-  const isAssigned = student?.assignedProctorId === currentUser?.uid || role === 'admin' || role === 'incharge';
+  const isAssigned = role === 'proctor' && student?.assignedProctorId === currentUser?.uid;
   if (!isAssigned) {
     return (
       <div className="max-w-md mx-auto my-12 p-6 bg-white dark:bg-navy-850 rounded-2xl border border-rose-200 shadow-xl text-center space-y-4">

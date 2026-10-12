@@ -48,6 +48,8 @@ function setStorageItem<T>(key: string, value: T): void {
 const deepClone = <T>(obj: T): T => JSON.parse(JSON.stringify(obj));
 
 class EventPassStore {
+  private version = 0;
+  private subscribers = new Set<() => void>();
   private users: UserProfile[];
   private requests: EventRequest[];
   private attendanceRecords: AttendanceRecord[];
@@ -102,6 +104,37 @@ class EventPassStore {
       'current_user',
       deepClone(INITIAL_STUDENTS[0])
     );
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('storage', (event) => {
+        if (!event.key?.startsWith(STORAGE_KEY_PREFIX)) return;
+
+        const key = event.key.slice(STORAGE_KEY_PREFIX.length);
+        if (key === 'users') this.users = getStorageItem('users', this.users);
+        if (key === 'requests') this.requests = getStorageItem('requests', this.requests);
+        if (key === 'attendance_records') this.attendanceRecords = getStorageItem('attendance_records', this.attendanceRecords);
+        if (key === 'datasets') this.datasets = getStorageItem('datasets', this.datasets);
+        if (key === 'settings') this.settings = getStorageItem('settings', this.settings);
+        if (key === 'audit_logs') this.auditLogs = getStorageItem('audit_logs', this.auditLogs);
+        if (key === 'notifications') this.notifications = getStorageItem('notifications', this.notifications);
+        if (key === 'current_user') this.currentUser = getStorageItem('current_user', this.currentUser);
+        this.notifySubscribers();
+      });
+    }
+  }
+
+  public subscribe = (subscriber: () => void): (() => void) => {
+    this.subscribers.add(subscriber);
+    return () => {
+      this.subscribers.delete(subscriber);
+    };
+  };
+
+  public getVersion = (): number => this.version;
+
+  private notifySubscribers(): void {
+    this.version += 1;
+    this.subscribers.forEach((subscriber) => subscriber());
   }
 
   public resetToDefault(): void {
@@ -132,6 +165,7 @@ class EventPassStore {
     setStorageItem('audit_logs', this.auditLogs);
     setStorageItem('notifications', this.notifications);
     setStorageItem('current_user', this.currentUser);
+    this.notifySubscribers();
   }
 
   // Current User & Session
@@ -143,6 +177,32 @@ class EventPassStore {
   public setCurrentUser(user: UserProfile | null): void {
     this.currentUser = user;
     setStorageItem('current_user', user);
+    this.notifySubscribers();
+  }
+
+  public syncAuthenticatedUser(profile: UserProfile): UserProfile {
+    const existingIndex = this.users.findIndex(
+      (user) => user.uid === profile.uid
+    );
+
+    if (existingIndex === -1) {
+      this.users.push(profile);
+    } else {
+      const existing = this.users[existingIndex];
+      this.users[existingIndex] = {
+        ...existing,
+        ...profile,
+        assignedProctorId:
+          profile.assignedProctorId ?? existing.assignedProctorId,
+        assignedProctorName:
+          profile.assignedProctorName ?? existing.assignedProctorName,
+      };
+    }
+
+    const syncedProfile = this.getUserById(profile.uid)!;
+    this.currentUser = syncedProfile;
+    this.persistAll();
+    return syncedProfile;
   }
 
   // Users
@@ -364,6 +424,22 @@ class EventPassStore {
       assignedProctorName: proctor.displayName,
       updatedAt: new Date().toISOString(),
     };
+
+    this.requests
+      .filter(
+        (request) =>
+          request.studentUid === studentUid &&
+          ['Submitted', 'Under Proctor Review', 'Returned for Correction'].includes(request.status)
+      )
+      .forEach((request) => {
+        this.createNotification({
+          recipientUid: proctor.uid,
+          title: 'Student Assigned for Review',
+          message: `${this.users[studentIdx].displayName} is assigned to your portfolio. Request ${request.referenceNumber} is awaiting review.`,
+          type: 'info',
+          link: `/proctor/review/${request.id}`,
+        });
+      });
 
     this.recordAuditLog({
       actorUid: adminActor.uid,
@@ -648,6 +724,22 @@ class EventPassStore {
       throw new Error('Only students can create event requests.');
     }
 
+    if (data.studentUid !== actor.uid) {
+      throw new Error('You can only submit a request for your own account.');
+    }
+
+    const student = this.getUserById(actor.uid);
+    if (!student || student.role !== 'student') {
+      throw new Error('Student profile is not available in the shared user directory.');
+    }
+
+    const assignedProctor = student.assignedProctorId
+      ? this.getUserById(student.assignedProctorId)
+      : null;
+    if (!assignedProctor || assignedProctor.role !== 'proctor') {
+      throw new Error('Ask the In-Charge to assign a proctor before submitting a request.');
+    }
+
     const attendance = this.getAttendanceByRollNumber(
       data.studentRollNumber
     );
@@ -681,6 +773,13 @@ class EventPassStore {
 
     const newRequest: EventRequest = {
       ...data,
+      studentUid: student.uid,
+      studentName: student.displayName,
+      studentRollNumber: student.rollNumber || data.studentRollNumber,
+      studentDepartment: student.department || data.studentDepartment,
+      studentYear: student.academicYear || data.studentYear,
+      studentSection: student.section || data.studentSection,
+      studentEmail: student.email,
       id: `req-${Date.now()}`,
       referenceNumber,
       attendanceSnapshot: {
@@ -721,15 +820,13 @@ class EventPassStore {
       },
     });
 
-    if (actor.assignedProctorId) {
-      this.createNotification({
-        recipientUid: actor.assignedProctorId,
-        title: 'New Review Assignment',
-        message: `${actor.displayName} (${actor.rollNumber}) submitted request "${newRequest.title}".`,
-        type: 'info',
-        link: `/proctor/review/${newRequest.id}`,
-      });
-    }
+    this.createNotification({
+      recipientUid: assignedProctor.uid,
+      title: 'New Review Assignment',
+      message: `${student.displayName} (${student.rollNumber}) submitted request "${newRequest.title}".`,
+      type: 'info',
+      link: `/proctor/review/${newRequest.id}`,
+    });
 
     this.persistAll();
     return newRequest;
@@ -769,10 +866,14 @@ class EventPassStore {
         ? 'Under Proctor Review'
         : current.status;
 
+    const isResubmission = current.status === 'Returned for Correction';
+
     this.requests[idx] = {
       ...current,
       ...updates,
       status: nextStatus,
+      proctorReview: isResubmission ? null : current.proctorReview,
+      correctionRemarks: isResubmission ? undefined : current.correctionRemarks,
       updatedAt: new Date().toISOString(),
       version: current.version + 1,
     };
@@ -792,6 +893,23 @@ class EventPassStore {
     });
 
     this.persistAll();
+
+    if (isResubmission) {
+      const student = this.getUserById(current.studentUid);
+      const proctor = student?.assignedProctorId
+        ? this.getUserById(student.assignedProctorId)
+        : null;
+      if (student && proctor?.role === 'proctor') {
+        this.createNotification({
+          recipientUid: proctor.uid,
+          title: 'Corrected Request Resubmitted',
+          message: `${student.displayName} resubmitted ${current.referenceNumber} for review.`,
+          type: 'info',
+          link: `/proctor/review/${current.id}`,
+        });
+        this.persistAll();
+      }
+    }
     return this.requests[idx];
   }
 
@@ -804,13 +922,9 @@ class EventPassStore {
     remarks: string,
     proctorActor: UserProfile
   ): EventRequest {
-    if (
-      proctorActor.role !== 'proctor' &&
-      proctorActor.role !== 'incharge' &&
-      proctorActor.role !== 'admin'
-    ) {
+    if (proctorActor.role !== 'proctor') {
       throw new Error(
-        'Unauthorized: Only assigned Proctors or In-Charge can submit reviews.'
+        'Unauthorized: Only the assigned Proctor can submit a recommendation.'
       );
     }
 
@@ -821,6 +935,10 @@ class EventPassStore {
     }
 
     const current = this.requests[idx];
+    const student = this.getUserById(current.studentUid);
+    if (student?.assignedProctorId !== proctorActor.uid) {
+      throw new Error('Unauthorized: This student is not assigned to your proctor portfolio.');
+    }
 
     let targetStatus: EventStatus;
 
@@ -895,6 +1013,20 @@ class EventPassStore {
           : 'alert',
       link: `/student/requests/${current.id}`,
     });
+
+    if (targetStatus !== 'Returned for Correction') {
+      this.users
+        .filter((user) => user.role === 'incharge')
+        .forEach((incharge) => {
+          this.createNotification({
+            recipientUid: incharge.uid,
+            title: 'Request Ready for Final Decision',
+            message: `${current.referenceNumber} received a proctor recommendation from ${proctorActor.displayName}.`,
+            type: 'info',
+            link: `/incharge/requests/${current.id}`,
+          });
+        });
+    }
 
     this.persistAll();
     return this.requests[idx];
@@ -1120,6 +1252,7 @@ class EventPassStore {
     if (idx !== -1) {
       this.notifications[idx].isRead = true;
       setStorageItem('notifications', this.notifications);
+      this.notifySubscribers();
     }
   }
 
@@ -1131,6 +1264,7 @@ class EventPassStore {
     });
 
     setStorageItem('notifications', this.notifications);
+    this.notifySubscribers();
   }
 }
 

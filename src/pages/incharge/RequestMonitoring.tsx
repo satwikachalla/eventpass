@@ -1,7 +1,8 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { eventPassStore } from '@/lib/store';
+import { useEventPassStoreVersion } from '@/lib/useEventPassStoreVersion';
 import { EventRequest, EventStatus, EventCategory } from '@/types';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -24,6 +25,7 @@ import {
 
 export const RequestMonitoring: React.FC = () => {
   const { currentUser } = useAuth();
+  useEventPassStoreVersion();
   const { success, error } = useToast();
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -39,10 +41,9 @@ export const RequestMonitoring: React.FC = () => {
   const [overrideReason, setOverrideReason] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const allRequests = useMemo(() => eventPassStore.getEventRequests(), []);
+  const allRequests = eventPassStore.getEventRequests();
 
-  const filteredRequests = useMemo(() => {
-    return allRequests.filter((r) => {
+  const filteredRequests = allRequests.filter((r) => {
       const matchSearch =
         searchTerm === '' ||
         r.studentName.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -50,7 +51,11 @@ export const RequestMonitoring: React.FC = () => {
         r.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
         r.referenceNumber.toLowerCase().includes(searchTerm.toLowerCase());
 
-      const matchStatus = statusFilter === 'ALL' || r.status === statusFilter;
+      const matchStatus =
+        statusFilter === 'ALL' ||
+        (statusFilter === 'FINAL_PENDING'
+          ? ['Recommended for Approval', 'Recommended for Rejection', 'Pending Final Decision'].includes(r.status)
+          : r.status === statusFilter);
       const matchCategory = categoryFilter === 'ALL' || r.category === categoryFilter;
       const matchEligibility =
         eligibilityFilter === 'ALL' ||
@@ -59,7 +64,6 @@ export const RequestMonitoring: React.FC = () => {
 
       return matchSearch && matchStatus && matchCategory && matchEligibility;
     });
-  }, [allRequests, searchTerm, statusFilter, categoryFilter, eligibilityFilter]);
 
   const openDecisionModal = (req: EventRequest) => {
     setSelectedRequest(req);
@@ -197,7 +201,7 @@ export const RequestMonitoring: React.FC = () => {
             onChange: setStatusFilter,
             options: [
               { label: 'All Statuses', value: 'ALL' },
-              { label: 'Pending Final Decision', value: 'Recommended for Approval' },
+              { label: 'Pending Final Decision', value: 'FINAL_PENDING' },
               { label: 'Under Proctor Review', value: 'Under Proctor Review' },
               { label: 'Approved', value: 'Approved' },
               { label: 'Rejected', value: 'Rejected' },
@@ -297,7 +301,7 @@ export const RequestMonitoring: React.FC = () => {
                             Inspect
                           </button>
                         </Link>
-                        {req.status !== 'Approved' && req.status !== 'Rejected' && req.status !== 'Withdrawn' && (
+                        {['Recommended for Approval', 'Recommended for Rejection', 'Pending Final Decision'].includes(req.status) && (
                           <Button size="sm" variant="primary" onClick={() => openDecisionModal(req)}>
                             Finalize
                           </Button>

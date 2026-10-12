@@ -20,6 +20,7 @@ import { useAuth } from '@/context/AuthContext';
 import { Badge } from './ui/Badge';
 import { Button } from './ui/Button';
 import { eventPassStore } from '@/lib/store';
+import { useEventPassStoreVersion } from '@/lib/useEventPassStoreVersion';
 
 export const Navbar: React.FC<{
   onToggleSidebar?: () => void;
@@ -33,6 +34,7 @@ export const Navbar: React.FC<{
   } = useAuth();
 
   const navigate = useNavigate();
+  useEventPassStoreVersion();
 
   const [isDark, setIsDark] =
     useState(

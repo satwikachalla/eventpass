@@ -7,7 +7,7 @@ describe('EventPass RBAC and Store Security Engine', () => {
     eventPassStore.resetToDefault();
   });
 
-  it('assigns Student role by default to any newly registered user', () => {
+  it('registers students unassigned until In-Charge selects a proctor', () => {
     const newUser = eventPassStore.createOrRegisterUser({
       uid: 'user-new-999',
       email: 'newstudent@college.edu',
@@ -16,7 +16,12 @@ describe('EventPass RBAC and Store Security Engine', () => {
 
     expect(newUser.role).toBe('student');
     expect(newUser.rollNumber).toBeDefined();
-    expect(newUser.assignedProctorId).toBeDefined();
+    expect(newUser.assignedProctorId).toBeUndefined();
+
+    const incharge = eventPassStore.getUsers().find((user) => user.role === 'incharge')!;
+    const proctor = eventPassStore.getUsers().find((user) => user.role === 'proctor')!;
+    eventPassStore.assignProctorToStudent(newUser.uid, proctor.uid, incharge);
+    expect(eventPassStore.getUserById(newUser.uid)?.assignedProctorId).toBe(proctor.uid);
   });
 
   it('prevents user from modifying their own role via profile update', () => {
@@ -60,6 +65,125 @@ describe('EventPass RBAC and Store Security Engine', () => {
     expect(() => {
       eventPassStore.assignProctorToStudent(student.uid, proctor2.uid, student);
     }).toThrow(/Unauthorized/);
+  });
+
+  it('routes a student request through the assigned proctor to In-Charge', () => {
+    const incharge = eventPassStore.getUsers().find((u) => u.role === 'incharge')!;
+    const proctor = eventPassStore.getUsers().find((u) => u.uid === 'proctor-002')!;
+    const authenticatedStudent = eventPassStore.syncAuthenticatedUser({
+      uid: 'google-student-001',
+      email: 'google.student@college.edu',
+      displayName: 'Google Student',
+      role: 'student',
+      rollNumber: 'CS2026-101',
+      department: 'Computer Science & Engineering',
+      academicYear: '3rd Year',
+      section: 'A',
+      isProfileComplete: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    eventPassStore.assignProctorToStudent(
+      authenticatedStudent.uid,
+      proctor.uid,
+      incharge
+    );
+
+    const request = eventPassStore.createEventRequest({
+      studentUid: authenticatedStudent.uid,
+      studentName: authenticatedStudent.displayName,
+      studentRollNumber: authenticatedStudent.rollNumber!,
+      studentDepartment: authenticatedStudent.department!,
+      studentYear: authenticatedStudent.academicYear!,
+      studentSection: authenticatedStudent.section!,
+      studentEmail: authenticatedStudent.email,
+      title: 'Campus Robotics Workshop',
+      organizer: 'Engineering Club',
+      category: 'Workshop',
+      venueCity: 'Campus',
+      startDate: '2026-11-20',
+      endDate: '2026-11-20',
+      purpose: 'Build practical robotics skills.',
+      expectedAcademicBenefit: 'Apply embedded systems coursework.',
+    }, authenticatedStudent);
+
+    expect(eventPassStore.getUsers().find((user) => user.uid === authenticatedStudent.uid)?.assignedProctorId)
+      .toBe(proctor.uid);
+    expect(eventPassStore.getEventRequests({ role: 'proctor', userUid: proctor.uid }))
+      .toContainEqual(expect.objectContaining({ id: request.id }));
+    expect(eventPassStore.getNotifications(proctor.uid))
+      .toContainEqual(expect.objectContaining({ link: `/proctor/review/${request.id}` }));
+
+    expect(() => eventPassStore.submitProctorReview(
+      request.id,
+      'recommend_approval',
+      'Recommended.',
+      eventPassStore.getUsers().find((user) => user.uid === 'proctor-001')!
+    )).toThrow(/not assigned/);
+
+    const recommendation = eventPassStore.submitProctorReview(
+      request.id,
+      'recommend_approval',
+      'Recommended for approval.',
+      proctor
+    );
+    expect(recommendation.status).toBe('Recommended for Approval');
+    expect(eventPassStore.getNotifications(incharge.uid))
+      .toContainEqual(expect.objectContaining({ link: `/incharge/requests/${request.id}` }));
+
+    const finalized = eventPassStore.submitFinalDecision(
+      request.id,
+      'Approved',
+      'Approved for participation.',
+      false,
+      undefined,
+      incharge
+    );
+    expect(finalized.status).toBe('Approved');
+    expect(eventPassStore.getNotifications(authenticatedStudent.uid))
+      .toContainEqual(expect.objectContaining({ title: 'Event Request Approved' }));
+  });
+
+  it('moves pending requests to the newly assigned proctor dashboard', () => {
+    const incharge = eventPassStore.getUsers().find((u) => u.role === 'incharge')!;
+    const student = eventPassStore.getUserById('student-010')!;
+    const previousProctor = eventPassStore.getUserById(student.assignedProctorId!)!;
+    const newProctor = eventPassStore.getUserById('proctor-002')!;
+    let changeCount = 0;
+    const unsubscribe = eventPassStore.subscribe(() => {
+      changeCount += 1;
+    });
+
+    eventPassStore.assignProctorToStudent(student.uid, newProctor.uid, incharge);
+    unsubscribe();
+
+    expect(changeCount).toBeGreaterThan(0);
+    expect(eventPassStore.getEventRequests({ role: 'proctor', userUid: previousProctor.uid }))
+      .not.toContainEqual(expect.objectContaining({ id: 'req-006' }));
+    expect(eventPassStore.getEventRequests({ role: 'proctor', userUid: newProctor.uid }))
+      .toContainEqual(expect.objectContaining({ id: 'req-006' }));
+    expect(eventPassStore.getNotifications(newProctor.uid))
+      .toContainEqual(expect.objectContaining({ link: '/proctor/review/req-006' }));
+  });
+
+  it('reloads shared users when another tab updates localStorage', () => {
+    const student = eventPassStore.getUserById('student-010')!;
+    const users = eventPassStore.getUsers().map((user) =>
+      user.uid === student.uid
+        ? { ...user, assignedProctorId: 'proctor-002' }
+        : user
+    );
+    const serializedUsers = JSON.stringify(users);
+
+    localStorage.setItem('eventpass_users', serializedUsers);
+    window.dispatchEvent(new StorageEvent('storage', {
+      key: 'eventpass_users',
+      newValue: serializedUsers,
+    }));
+
+    expect(eventPassStore.getUserById(student.uid)?.assignedProctorId)
+      .toBe('proctor-002');
   });
 
   it('forbids students from submitting requests on behalf of other students', () => {
