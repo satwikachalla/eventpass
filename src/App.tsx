@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from '@/context/AuthContext';
 import { ToastProvider } from '@/components/ui/Toast';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
@@ -31,7 +31,7 @@ import { HelpPage } from '@/pages/HelpPage';
 
 function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename="/eventpass">
       <ToastProvider>
         <AuthProvider>
           <Routes>
@@ -42,6 +42,7 @@ function App() {
 
             {/* Protected Application Routes inside Master Layout */}
             <Route element={<Layout />}>
+
               {/* Student Portal */}
               <Route element={<ProtectedRoute allowedRoles={['student', 'admin']} />}>
                 <Route path="/student/dashboard" element={<StudentDashboard />} />
@@ -81,6 +82,7 @@ function App() {
                 <Route path="/reports" element={<ReportsPage />} />
                 <Route path="/help" element={<HelpPage />} />
               </Route>
+
             </Route>
 
             {/* 404 Fallback */}
