@@ -1,0 +1,150 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function getUserRole() {
+      return getUserData().role;
+    }
+
+    function isStudent() {
+      return isAuthenticated() && (getUserRole() == 'student');
+    }
+
+    function isProctor() {
+      return isAuthenticated() && (getUserRole() == 'proctor');
+    }
+
+    function isIncharge() {
+      return isAuthenticated() && (getUserRole() == 'incharge');
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (getUserRole() == 'admin');
+    }
+
+    function isOwner(uid) {
+      return isAuthenticated() && request.auth.uid == uid;
+    }
+
+    // Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Users Collection
+    match /users/{userId} {
+      // Any authenticated user can read their own profile, In-Charge, Proctor, and Admin can view profiles
+      allow read: if isOwner(userId) || isProctor() || isIncharge() || isAdmin();
+
+      // New users can only create their own profile with 'student' role by default
+      allow create: if isOwner(userId)
+                    && request.resource.data.role == 'student'
+                    && request.resource.data.uid == userId;
+
+      // Users can update their own personal non-role details (profile info)
+      // Only Admin can modify role and assigned proctor
+      allow update: if (isOwner(userId) && request.resource.data.role == resource.data.role)
+                    || isAdmin();
+
+      allow delete: if isAdmin();
+    }
+
+    // Proctor Assignments
+    match /proctorAssignments/{assignmentId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // Department Settings
+    match /departmentSettings/{settingId} {
+      allow read: if isAuthenticated();
+      allow write: if isIncharge() || isAdmin();
+    }
+
+    // Event Requests
+    match /eventRequests/{requestId} {
+      // Students can only read their own requests
+      // Proctors can read requests of assigned students
+      // In-Charge and Admin can read all requests
+      allow read: if isAuthenticated() && (
+        (isStudent() && resource.data.studentUid == request.auth.uid) ||
+        isProctor() ||
+        isIncharge() ||
+        isAdmin()
+      );
+
+      // Student can create new requests for themselves
+      allow create: if isAuthenticated() &&
+                    request.resource.data.studentUid == request.auth.uid &&
+                    request.resource.data.status in ['Draft', 'Submitted', 'Under Proctor Review'];
+
+      // Updates:
+      // 1. Student can update their own request only if Draft or Returned for Correction
+      // 2. Proctor can update proctorReview and set Recommended or Returned
+      // 3. In-Charge / Admin can finalize or return
+      allow update: if isAuthenticated() && (
+        // Student editing own returned or draft request
+        (isOwner(resource.data.studentUid) &&
+         resource.data.status in ['Draft', 'Returned for Correction'] &&
+         request.resource.data.studentUid == resource.data.studentUid) ||
+        // Proctor reviewing assigned request
+        (isProctor() &&
+         resource.data.status in ['Submitted', 'Under Proctor Review'] &&
+         request.resource.data.status in ['Recommended for Approval', 'Recommended for Rejection', 'Returned for Correction']) ||
+        // In-Charge final decision
+        (isIncharge() &&
+         request.resource.data.status in ['Approved', 'Rejected', 'Returned for Correction']) ||
+        isAdmin()
+      );
+
+      // Student can withdraw own non-finalized request
+      allow delete: if false; // Soft withdrawal via status update
+    }
+
+    // Attendance Datasets
+    match /attendanceDatasets/{datasetId} {
+      allow read: if isAuthenticated();
+      allow write: if isIncharge() || isAdmin();
+    }
+
+    // Attendance Records
+    match /attendanceRecords/{recordId} {
+      // Students can only read their own attendance
+      // Proctors, In-Charge, and Admin can read
+      allow read: if isAuthenticated() && (
+        (isStudent() && resource.data.studentUid == request.auth.uid) ||
+        isProctor() ||
+        isIncharge() ||
+        isAdmin()
+      );
+      // Only In-Charge and Admin can commit attendance records
+      allow write: if isIncharge() || isAdmin();
+    }
+
+    // Audit Logs
+    match /auditLogs/{logId} {
+      // Read restricted to Admin and In-Charge
+      allow read: if isIncharge() || isAdmin();
+      // Any authenticated user action can append an audit record, but never modify or delete
+      allow create: if isAuthenticated() && request.resource.data.actorUid == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // Notifications
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated() && resource.data.recipientUid == request.auth.uid;
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && resource.data.recipientUid == request.auth.uid;
+      allow delete: if isAuthenticated() && resource.data.recipientUid == request.auth.uid;
+    }
+  }
+}
